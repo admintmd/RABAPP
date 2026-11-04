@@ -284,9 +284,32 @@
 const SUPABASE_URL = "https://hguizzsqjmaijztuzqak.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_OIb1YP0YV4_xJ6axLGVXJw_qNlZqiPq";
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* --- Storage aman: sebagian browser (Edge Tracking Prevention, mode privat,
+   file://) memblokir localStorage. Tanpa fallback ini, sesi login tidak
+   pernah tersimpan dan aplikasi kembali ke layar login terus-menerus. --- */
+const memStore = {};
+let storageBlocked = false;
+const safeStorage = {
+  getItem(k){ try { return window.localStorage.getItem(k); }
+              catch(e){ storageBlocked = true; return k in memStore ? memStore[k] : null; } },
+  setItem(k,v){ try { window.localStorage.setItem(k,v); }
+                catch(e){ storageBlocked = true; memStore[k] = String(v); } },
+  removeItem(k){ try { window.localStorage.removeItem(k); }
+                 catch(e){ storageBlocked = true; delete memStore[k]; } }
+};
+try {
+  const probe = "__rab_probe__";
+  window.localStorage.setItem(probe, "1");
+  if (window.localStorage.getItem(probe) !== "1") storageBlocked = true;
+  window.localStorage.removeItem(probe);
+} catch(e){ storageBlocked = true; }
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { storage: safeStorage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:false }
+});
 const sbProv = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"rab-prov" }
+  auth: { storage: safeStorage, persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"rab-prov" }
 });
 
 const S = { user:null, profile:null, items:[], cats:[], rabs:[], users:[], logs:[], draft:{ id:null, lines:[] } };
@@ -307,7 +330,11 @@ function toast(msg,type){
 }
 function authMsg(m,type){
   const e=$("authMsg"); e.textContent=m;
-  e.className="mt-4 text-sm rounded-lg px-3 py-2 "+(type==="ok"?"bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300":"bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300");
+  e.className="mt-4 text-sm rounded-lg px-3 py-2 "+(type==="ok"
+    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+    : type==="warn"
+    ? "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+    : "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300");
   e.classList.remove("hidden");
 }
 function openModal(t,h){ $("modalTitle").textContent=t; $("modalBody").innerHTML=h; $("modal").classList.remove("hidden"); }
@@ -316,13 +343,13 @@ function closeModal(){ $("modal").classList.add("hidden"); $("modalBody").innerH
 /* ===================== THEME ===================== */
 function applyTheme(mode){
   document.documentElement.classList.toggle("dark", mode === "dark");
-  localStorage.setItem("rab-theme", mode);
+  safeStorage.setItem("rab-theme", mode);
   const icon = mode === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
   if ($("themeIcon")) $("themeIcon").textContent = icon;
   if ($("themeIcon2")) $("themeIcon2").textContent = icon;
 }
 function toggleTheme(){ applyTheme(document.documentElement.classList.contains("dark") ? "light" : "dark"); }
-applyTheme(localStorage.getItem("rab-theme") ||
+applyTheme(safeStorage.getItem("rab-theme") ||
   (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
 
 /* ===================== AUTH ===================== */
@@ -355,8 +382,27 @@ sb.auth.onAuthStateChange(async (_e, s) => {
 
 /* ===================== BOOT ===================== */
 async function bootApp(){
-  const { data:prof, error } = await sb.from("profiles").select("*").eq("id", S.user.id).single();
-  if (error) return toast("Gagal memuat profil: " + error.message, "err");
+  let { data:prof, error } = await sb.from("profiles").select("*").eq("id", S.user.id).maybeSingle();
+
+  if (error){
+    authMsg("Login berhasil, tetapi gagal membaca tabel profiles: " + error.message +
+            " — cek apakah SQL schema sudah dijalankan.");
+    await sb.auth.signOut(); return;
+  }
+  if (!prof){
+    // Akun ada di Auth tetapi barisnya tidak ada di profiles (biasanya akun
+    // dibuat sebelum trigger terpasang). Coba buat sendiri.
+    const r = await sb.from("profiles").insert({
+      id:S.user.id, email:S.user.email,
+      full_name:(S.user.user_metadata||{}).full_name || null,
+      division:(S.user.user_metadata||{}).division || null, role:"user" }).select().single();
+    if (r.error){
+      authMsg("Akun ini tidak punya baris di tabel profiles dan tidak bisa dibuat otomatis (" +
+              r.error.message + "). Jalankan script perbaikan profil di SQL Editor.");
+      await sb.auth.signOut(); return;
+    }
+    prof = r.data;
+  }
   S.profile = prof;
   $("authScreen").classList.add("hidden"); $("app").classList.remove("hidden");
   $("meEmail").textContent = prof.email;
@@ -1125,6 +1171,11 @@ $("userForm").onsubmit = async e => {
 
 /* ===================== INIT ===================== */
 (async () => {
+  if (storageBlocked){
+    authMsg("Penyimpanan browser diblokir (Tracking Prevention / mode privat / dibuka lewat file://). " +
+            "Login tetap bisa, tetapi sesi hilang saat halaman di-refresh. Jalankan lewat http://localhost " +
+            "atau matikan Tracking Prevention untuk situs ini.", "warn");
+  }
   const { data } = await sb.auth.getSession();
   if (data.session && data.session.user){ S.user = data.session.user; await bootApp(); }
 })();
