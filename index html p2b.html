@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Sistem RAB &amp; Database Barang/Jasa</title>
+
+<!-- ============ CDN ============ -->
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+
+<style>
+  :root{ color-scheme: light; }
+  body{ font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .tab-active{ background:#0f172a; color:#fff; }
+  table.sticky-head thead th{ position:sticky; top:0; background:#f8fafc; z-index:5; }
+  input,select,textarea{ outline:none; }
+  .scroll-x{ overflow-x:auto; }
+  @media print{ .no-print{ display:none !important; } }
+</style>
+</head>
+
+<body class="bg-slate-100 text-slate-800">
+
+<!-- ================= AUTH SCREEN ================= -->
+<div id="authScreen" class="min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-7">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">Sistem RAB</h1>
+      <p class="text-sm text-slate-500">Manajemen Rencana Anggaran Biaya &amp; Database Barang/Jasa</p>
+    </div>
+
+    <div class="flex mb-5 bg-slate-100 rounded-lg p-1">
+      <button id="tabLogin" class="flex-1 py-2 text-sm font-medium rounded-md tab-active">Masuk</button>
+      <button id="tabRegister" class="flex-1 py-2 text-sm font-medium rounded-md">Daftar</button>
+    </div>
+
+    <form id="loginForm" class="space-y-3">
+      <div>
+        <label class="text-xs font-medium text-slate-600">Email</label>
+        <input type="email" id="loginEmail" required class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Password</label>
+        <input type="password" id="loginPassword" required class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+      </div>
+      <button class="w-full bg-slate-900 text-white py-2.5 rounded-lg font-medium hover:bg-slate-800">Masuk</button>
+    </form>
+
+    <form id="registerForm" class="space-y-3 hidden">
+      <div>
+        <label class="text-xs font-medium text-slate-600">Nama Lengkap</label>
+        <input type="text" id="regName" required class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Email</label>
+        <input type="email" id="regEmail" required class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Divisi</label>
+        <input type="text" id="regDivision" placeholder="cth: Engineering / Procurement" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Password (min. 6 karakter)</label>
+        <input type="password" id="regPassword" required minlength="6" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+      </div>
+      <button class="w-full bg-slate-900 text-white py-2.5 rounded-lg font-medium hover:bg-slate-800">Daftar</button>
+      <p class="text-[11px] text-slate-500 leading-relaxed">User pertama yang mendaftar otomatis menjadi admin. Selanjutnya semua pendaftar menjadi <b>user</b> — promosi role hanya dari menu Manajemen User.</p>
+    </form>
+
+    <div id="authMsg" class="mt-4 text-sm hidden rounded-lg px-3 py-2"></div>
+  </div>
+</div>
+
+<!-- ================= APP SHELL ================= -->
+<div id="app" class="hidden min-h-screen">
+
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-slate-900 text-white grid place-items-center font-bold">R</div>
+        <div>
+          <div class="font-semibold leading-tight">Sistem RAB</div>
+          <div class="text-[11px] text-slate-500 leading-tight">Rencana Anggaran Biaya</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="text-right hidden sm:block">
+          <div id="meEmail" class="text-sm font-medium"></div>
+          <div id="meMeta" class="text-[11px] text-slate-500"></div>
+        </div>
+        <button id="btnLogout" class="text-sm px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Keluar</button>
+      </div>
+    </div>
+    <nav class="max-w-7xl mx-auto px-4 pb-2 flex gap-1 overflow-x-auto">
+      <button data-tab="dashboard" class="navbtn px-4 py-2 text-sm rounded-lg whitespace-nowrap">Dashboard</button>
+      <button data-tab="items"     class="navbtn px-4 py-2 text-sm rounded-lg whitespace-nowrap">Master Barang/Jasa</button>
+      <button data-tab="builder"   class="navbtn px-4 py-2 text-sm rounded-lg whitespace-nowrap">Buat RAB</button>
+      <button data-tab="history"   class="navbtn px-4 py-2 text-sm rounded-lg whitespace-nowrap">Histori RAB</button>
+      <button data-tab="users"     class="navbtn px-4 py-2 text-sm rounded-lg whitespace-nowrap hidden" id="navUsers">Manajemen User</button>
+    </nav>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-4">
+
+    <!-- ---------- DASHBOARD ---------- -->
+    <section id="view-dashboard" class="view hidden">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <div class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">Total Item</div>
+          <div id="statItems" class="text-2xl font-bold mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">Referensi Harga PO</div>
+          <div id="statPrices" class="text-2xl font-bold mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">Jumlah RAB</div>
+          <div id="statRabs" class="text-2xl font-bold mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">Nilai RAB Total</div>
+          <div id="statValue" class="text-lg font-bold mt-1">Rp 0</div>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-4">
+        <h3 class="font-semibold mb-3">RAB Terbaru</h3>
+        <div id="dashRecent" class="text-sm text-slate-500">Memuat…</div>
+      </div>
+    </section>
+
+    <!-- ---------- MASTER ITEMS ---------- -->
+    <section id="view-items" class="view hidden">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <input id="itemSearch" placeholder="Cari kode / nama / kategori…" class="flex-1 min-w-[220px] px-3 py-2 border border-slate-300 rounded-lg bg-white" />
+        <button id="btnNewItem" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium">+ Item Baru</button>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 scroll-x">
+        <table class="w-full text-sm sticky-head">
+          <thead class="text-left text-xs uppercase text-slate-500 border-b">
+            <tr>
+              <th class="px-3 py-2">Kode</th><th class="px-3 py-2">Nama</th>
+              <th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Satuan</th>
+              <th class="px-3 py-2 text-right">Harga Terendah</th>
+              <th class="px-3 py-2 text-right">PO Terakhir</th>
+              <th class="px-3 py-2">#PO</th><th class="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- RAB BUILDER ---------- -->
+    <section id="view-builder" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2 space-y-4">
+
+          <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-semibold">Informasi RAB</h3>
+              <span id="rabEditBadge" class="hidden text-[11px] px-2 py-1 rounded bg-amber-100 text-amber-800">Mode Edit</span>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div><label class="text-xs text-slate-600">Judul RAB *</label>
+                <input id="rabTitle" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+              <div><label class="text-xs text-slate-600">Nama Proyek</label>
+                <input id="rabProject" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+              <div><label class="text-xs text-slate-600">Divisi</label>
+                <input id="rabDivision" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+              <div><label class="text-xs text-slate-600">Status</label>
+                <select id="rabStatus" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                  <option>Draft</option><option>Approved</option><option>Exported</option>
+                </select></div>
+              <div class="sm:col-span-2"><label class="text-xs text-slate-600">Catatan</label>
+                <textarea id="rabNotes" rows="2" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg"></textarea></div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl border border-slate-200 p-4">
+            <h3 class="font-semibold mb-3">Tambah Item</h3>
+            <input id="builderSearch" placeholder="Ketik minimal 2 huruf untuk mencari item…" class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+            <div id="builderResults" class="mt-2 max-h-64 overflow-y-auto divide-y border border-slate-200 rounded-lg hidden"></div>
+            <button id="btnAdHoc" class="mt-2 text-sm text-slate-600 underline">+ Tambah item manual (tidak ada di master)</button>
+          </div>
+
+          <div class="bg-white rounded-xl border border-slate-200">
+            <div class="p-4 border-b"><h3 class="font-semibold">Rincian RAB</h3></div>
+            <div class="scroll-x">
+              <table class="w-full text-sm">
+                <thead class="text-left text-xs uppercase text-slate-500 border-b bg-slate-50">
+                  <tr><th class="px-3 py-2 w-8">#</th><th class="px-3 py-2">Uraian</th>
+                    <th class="px-3 py-2 w-20">Satuan</th><th class="px-3 py-2 w-24">Qty</th>
+                    <th class="px-3 py-2 w-56">Acuan Harga</th><th class="px-3 py-2 w-36">Harga Satuan</th>
+                    <th class="px-3 py-2 text-right w-36">Subtotal</th><th class="w-10"></th></tr>
+                </thead>
+                <tbody id="draftBody"></tbody>
+              </table>
+            </div>
+            <div id="draftEmpty" class="p-8 text-center text-sm text-slate-400">Belum ada item.</div>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="bg-white rounded-xl border border-slate-200 p-4 lg:sticky lg:top-32">
+            <h3 class="font-semibold mb-3">Rekapitulasi</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between"><span class="text-slate-600">Subtotal</span><span id="sumSubtotal" class="font-medium">Rp 0</span></div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-slate-600">Margin (%)</span>
+                <input id="inpMargin" type="number" step="0.01" value="0" class="w-20 px-2 py-1 border border-slate-300 rounded text-right" />
+              </div>
+              <div class="flex justify-between text-slate-500"><span>Nilai Margin</span><span id="sumMargin">Rp 0</span></div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-slate-600">PPN (%)</span>
+                <input id="inpTax" type="number" step="0.01" value="11" class="w-20 px-2 py-1 border border-slate-300 rounded text-right" />
+              </div>
+              <div class="flex justify-between text-slate-500"><span>Nilai PPN</span><span id="sumTax">Rp 0</span></div>
+              <div class="border-t pt-2 flex justify-between text-base font-bold"><span>Total</span><span id="sumTotal">Rp 0</span></div>
+              <p class="text-[11px] text-slate-400">Urutan hitung: Subtotal → + Margin → PPN dikenakan atas (Subtotal + Margin).</p>
+            </div>
+            <div class="mt-4 space-y-2">
+              <button id="btnSaveRab" class="w-full bg-slate-900 text-white py-2.5 rounded-lg font-medium">Simpan RAB</button>
+              <div class="grid grid-cols-2 gap-2">
+                <button id="btnXlsDraft" class="py-2 rounded-lg border border-slate-300 text-sm">Excel</button>
+                <button id="btnPdfDraft" class="py-2 rounded-lg border border-slate-300 text-sm">PDF</button>
+              </div>
+              <button id="btnResetRab" class="w-full py-2 text-sm text-slate-500 underline">Reset form</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- HISTORY ---------- -->
+    <section id="view-history" class="view hidden">
+      <div class="flex flex-wrap gap-2 mb-3">
+        <input id="histSearch" placeholder="Cari judul / proyek…" class="flex-1 min-w-[220px] px-3 py-2 border border-slate-300 rounded-lg bg-white" />
+        <select id="histStatus" class="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
+          <option value="">Semua Status</option><option>Draft</option><option>Approved</option><option>Exported</option>
+        </select>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 scroll-x">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs uppercase text-slate-500 border-b bg-slate-50">
+            <tr><th class="px-3 py-2">Judul</th><th class="px-3 py-2">Proyek</th>
+              <th class="px-3 py-2">Pembuat</th><th class="px-3 py-2">Tanggal</th>
+              <th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Total</th>
+              <th class="px-3 py-2"></th></tr>
+          </thead>
+          <tbody id="histBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- USERS ---------- -->
+    <section id="view-users" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-4">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <h3 class="font-semibold mb-3">Buat Akun Baru</h3>
+          <form id="userForm" class="space-y-3">
+            <div><label class="text-xs text-slate-600">Nama Lengkap</label>
+              <input id="newName" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+            <div><label class="text-xs text-slate-600">Email *</label>
+              <input id="newEmail" type="email" required class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+            <div><label class="text-xs text-slate-600">Password *</label>
+              <input id="newPass" type="text" required minlength="6" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+            <div><label class="text-xs text-slate-600">Divisi</label>
+              <input id="newDiv" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" /></div>
+            <div><label class="text-xs text-slate-600">Role</label>
+              <select id="newRole" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                <option value="user">user</option><option value="admin">admin</option></select></div>
+            <button class="w-full bg-slate-900 text-white py-2.5 rounded-lg font-medium">Buat Akun</button>
+            <p class="text-[11px] text-slate-500">Akun dibuat lewat endpoint sign-up publik (tanpa service key). Pastikan "Confirm email" dimatikan di Supabase.</p>
+          </form>
+        </div>
+        <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 scroll-x">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs uppercase text-slate-500 border-b bg-slate-50">
+              <tr><th class="px-3 py-2">Email</th><th class="px-3 py-2">Nama</th>
+                <th class="px-3 py-2">Divisi</th><th class="px-3 py-2">Role</th>
+                <th class="px-3 py-2">Aktif</th></tr></thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ================= MODAL ================= -->
+<div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 p-4 overflow-y-auto">
+  <div class="max-w-3xl mx-auto my-8 bg-white rounded-xl shadow-2xl">
+    <div class="flex items-center justify-between px-5 py-3 border-b">
+      <h3 id="modalTitle" class="font-semibold"></h3>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+    </div>
+    <div id="modalBody" class="p-5"></div>
+  </div>
+</div>
+
+<div id="toast" class="hidden fixed bottom-5 right-5 z-[60] px-4 py-3 rounded-lg shadow-lg text-sm text-white"></div>
+<div id="pdfStage" style="position:fixed;left:-10000px;top:0;width:794px;background:#fff;"></div>
+
+<script>
+/* =====================================================================
+   KONFIGURASI — ISI DUA BARIS INI
+   ===================================================================== */
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
+
+/* anon key aman di frontend SELAMA RLS aktif. service_role key TIDAK. */
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* client kedua khusus provisioning user oleh admin:
+   persistSession=false + storageKey terpisah => signUp tidak menendang sesi admin */
+const sbProv = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"rab-prov" }
+});
+
+/* ===================== STATE ===================== */
+const S = {
+  user:null, profile:null,
+  items:[], rabs:[], users:[],
+  draft:{ id:null, lines:[] }
+};
+
+/* ===================== UTIL ===================== */
+const $ = id => document.getElementById(id);
+const fmtRp = n => "Rp " + (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:2});
+const fmtNum = n => (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:2});
+const fmtDate = d => d ? new Date(d).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}) : "-";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const uid = () => Math.random().toString(36).slice(2,10);
+
+function toast(msg, type="ok"){
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "fixed bottom-5 right-5 z-[60] px-4 py-3 rounded-lg shadow-lg text-sm text-white " +
+                (type==="err" ? "bg-rose-600" : "bg-slate-900");
+  t.classList.remove("hidden");
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.add("hidden"), 3500);
+}
+function authMsg(msg,type="err"){
+  const m = $("authMsg"); m.textContent = msg;
+  m.className = "mt-4 text-sm rounded-lg px-3 py-2 " + (type==="err" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700");
+  m.classList.remove("hidden");
+}
+function openModal(title, html){ $("modalTitle").textContent = title; $("modalBody").innerHTML = html; $("modal").classList.remove("hidden"); }
+function closeModal(){ $("modal").classList.add("hidden"); $("modalBody").innerHTML = ""; }
+
+/* ===================== AUTH ===================== */
+$("tabLogin").onclick = () => {
+  $("tabLogin").classList.add("tab-active"); $("tabRegister").classList.remove("tab-active");
+  $("loginForm").classList.remove("hidden"); $("registerForm").classList.add("hidden"); $("authMsg").classList.add("hidden");
+};
+$("tabRegister").onclick = () => {
+  $("tabRegister").classList.add("tab-active"); $("tabLogin").classList.remove("tab-active");
+  $("registerForm").classList.remove("hidden"); $("loginForm").classList.add("hidden"); $("authMsg").classList.add("hidden");
+};
+
+$("loginForm").onsubmit = async e => {
+  e.preventDefault();
+  const { error } = await sb.auth.signInWithPassword({ email:$("loginEmail").value.trim(), password:$("loginPassword").value });
+  if (error) return authMsg(error.message);
+};
+
+$("registerForm").onsubmit = async e => {
+  e.preventDefault();
+  const { data, error } = await sb.auth.signUp({
+    email: $("regEmail").value.trim(),
+    password: $("regPassword").value,
+    options:{ data:{ full_name:$("regName").value.trim(), division:$("regDivision").value.trim() } }
+  });
+  if (error) return authMsg(error.message);
+  if (!data.session) return authMsg("Akun dibuat, tetapi belum ada sesi. Matikan 'Confirm email' di Supabase lalu login.","ok");
+};
+
+$("btnLogout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+sb.auth.onAuthStateChange(async (_e, session) => {
+  if (session?.user) { S.user = session.user; await bootApp(); }
+  else { S.user = null; $("app").classList.add("hidden"); $("authScreen").classList.remove("hidden"); }
+});
+
+/* ===================== BOOT ===================== */
+async function bootApp(){
+  const { data:prof, error } = await sb.from("profiles").select("*").eq("id", S.user.id).single();
+  if (error){ toast("Gagal memuat profil: " + error.message, "err"); return; }
+  S.profile = prof;
+
+  $("authScreen").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("meEmail").textContent = prof.email;
+  $("meMeta").textContent = (prof.division || "Tanpa divisi") + " · " + prof.role;
+  if (prof.role === "admin") $("navUsers").classList.remove("hidden");
+  $("rabDivision").value = prof.division || "";
+
+  await Promise.all([loadItems(), loadRabs()]);
+  if (prof.role === "admin") loadUsers();
+  switchTab("dashboard");
+}
+
+/* ===================== NAV ===================== */
+document.querySelectorAll(".navbtn").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function switchTab(tab){
+  document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
+  $("view-" + tab).classList.remove("hidden");
+  document.querySelectorAll(".navbtn").forEach(b => b.classList.toggle("tab-active", b.dataset.tab === tab));
+  if (tab === "dashboard") renderDashboard();
+  if (tab === "history") renderHistory();
+}
+
+/* ===================== MASTER ITEMS ===================== */
+async function loadItems(){
+  const { data, error } = await sb.from("items")
+    .select("*, vendor_prices(*)").order("code", { ascending:true });
+  if (error){ toast(error.message, "err"); return; }
+  S.items = data || [];
+  renderItems();
+}
+function priceRef(item){
+  const vps = (item.vendor_prices || []).slice();
+  if (!vps.length) return { lowest:null, last:null, count:0 };
+  const lowest = vps.reduce((a,b) => Number(b.unit_price) < Number(a.unit_price) ? b : a);
+  const last = vps.slice().sort((a,b) =>
+    new Date(b.po_date || b.created_at) - new Date(a.po_date || a.created_at))[0];
+  return { lowest, last, count:vps.length };
+}
+function renderItems(){
+  const q = ($("itemSearch").value || "").toLowerCase();
+  const rows = S.items.filter(i =>
+    !q || [i.code,i.name,i.category,i.description].join(" ").toLowerCase().includes(q));
+  $("itemsBody").innerHTML = rows.map(i => {
+    const p = priceRef(i);
+    return `<tr class="border-b hover:bg-slate-50">
+      <td class="px-3 py-2 font-mono text-xs">${esc(i.code)}</td>
+      <td class="px-3 py-2">
+        <div class="font-medium">${esc(i.name)}</div>
+        <div class="text-[11px] text-slate-400">${esc(i.description || "")}</div>
+      </td>
+      <td class="px-3 py-2">${esc(i.category || "-")}</td>
+      <td class="px-3 py-2">${esc(i.unit)}</td>
+      <td class="px-3 py-2 text-right">${p.lowest ? fmtRp(p.lowest.unit_price) : '<span class="text-amber-600 text-xs">Item Baru</span>'}</td>
+      <td class="px-3 py-2 text-right">${p.last ? fmtRp(p.last.unit_price) : "-"}</td>
+      <td class="px-3 py-2"><button onclick="openPrices('${i.id}')" class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">${p.count} PO</button></td>
+      <td class="px-3 py-2 text-right whitespace-nowrap">
+        <button onclick="openItemForm('${i.id}')" class="text-xs text-slate-600 underline">Edit</button>
+        ${S.profile.role === "admin" ? `<button onclick="deleteItem('${i.id}')" class="text-xs text-rose-600 underline ml-2">Hapus</button>` : ""}
+      </td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="p-8 text-center text-slate-400">Tidak ada data.</td></tr>`;
+}
+$("itemSearch").oninput = renderItems;
+$("btnNewItem").onclick = () => openItemForm(null);
+
+function openItemForm(id){
+  const it = S.items.find(x => x.id === id) || {};
+  openModal(id ? "Edit Item" : "Item Baru", `
+    <div class="grid sm:grid-cols-2 gap-3">
+      <div><label class="text-xs text-slate-600">Kode *</label><input id="f_code" value="${esc(it.code||"")}" class="w-full mt-1 px-3 py-2 border rounded-lg"></div>
+      <div><label class="text-xs text-slate-600">Nama *</label><input id="f_name" value="${esc(it.name||"")}" class="w-full mt-1 px-3 py-2 border rounded-lg"></div>
+      <div><label class="text-xs text-slate-600">Kategori</label><input id="f_cat" value="${esc(it.category||"")}" class="w-full mt-1 px-3 py-2 border rounded-lg"></div>
+      <div><label class="text-xs text-slate-600">Satuan *</label>
+        <select id="f_unit" class="w-full mt-1 px-3 py-2 border rounded-lg bg-white">
+          ${["Pcs","Unit","Set","Meter","M2","M3","Kg","Lot","Titik","Jam","Hari","Bulan","Ls"]
+            .map(u => `<option ${it.unit===u?"selected":""}>${u}</option>`).join("")}
+        </select></div>
+      <div><label class="text-xs text-slate-600">Tipe</label>
+        <select id="f_type" class="w-full mt-1 px-3 py-2 border rounded-lg bg-white">
+          <option ${it.item_type==="Barang"?"selected":""}>Barang</option>
+          <option ${it.item_type==="Jasa"?"selected":""}>Jasa</option></select></div>
+      <div class="flex items-end"><label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" id="f_new" ${it.is_new_item?"checked":""}> Tandai sebagai "Item Baru" (belum ada PO)</label></div>
+      <div class="sm:col-span-2"><label class="text-xs text-slate-600">Deskripsi</label>
+        <textarea id="f_desc" rows="2" class="w-full mt-1 px-3 py-2 border rounded-lg">${esc(it.description||"")}</textarea></div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeModal()" class="px-4 py-2 rounded-lg border">Batal</button>
+      <button onclick="saveItem(${id?`'${id}'`:"null"})" class="px-4 py-2 rounded-lg bg-slate-900 text-white">Simpan</button>
+    </div>`);
+}
+async function saveItem(id){
+  const payload = {
+    code:$("f_code").value.trim(), name:$("f_name").value.trim(),
+    category:$("f_cat").value.trim() || null, unit:$("f_unit").value,
+    item_type:$("f_type").value, is_new_item:$("f_new").checked,
+    description:$("f_desc").value.trim() || null
+  };
+  if (!payload.code || !payload.name) return toast("Kode dan Nama wajib diisi.", "err");
+  const { error } = id ? await sb.from("items").update(payload).eq("id", id)
+                       : await sb.from("items").insert(payload);
+  if (error) return toast(error.message, "err");
+  closeModal(); toast("Item tersimpan."); loadItems();
+}
+async function deleteItem(id){
+  if (!confirm("Hapus item ini beserta seluruh riwayat harga vendornya?")) return;
+  const { error } = await sb.from("items").delete().eq("id", id);
+  if (error) return toast(error.message, "err");
+  toast("Item dihapus."); loadItems();
+}
+
+/* ---------- Harga vendor ---------- */
+function openPrices(itemId){
+  const it = S.items.find(x => x.id === itemId);
+  const vps = (it.vendor_prices || []).slice()
+    .sort((a,b) => new Date(b.po_date||b.created_at) - new Date(a.po_date||a.created_at));
+  openModal(`Harga Vendor — ${it.name}`, `
+    <div class="scroll-x mb-4"><table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b"><tr>
+        <th class="px-2 py-2 text-left">Vendor</th><th class="px-2 py-2 text-left">No. PO</th>
+        <th class="px-2 py-2 text-left">Tanggal</th><th class="px-2 py-2 text-right">Harga</th>
+        <th class="px-2 py-2 text-left">Catatan</th><th></th></tr></thead>
+      <tbody>${vps.map(v => `<tr class="border-b">
+        <td class="px-2 py-2">${esc(v.vendor_name)}</td>
+        <td class="px-2 py-2 font-mono text-xs">${esc(v.po_number||"-")}</td>
+        <td class="px-2 py-2">${fmtDate(v.po_date)}</td>
+        <td class="px-2 py-2 text-right font-medium">${fmtRp(v.unit_price)}</td>
+        <td class="px-2 py-2 text-xs text-slate-500">${esc(v.notes||"")}</td>
+        <td class="px-2 py-2 text-right"><button onclick="delPrice('${v.id}','${itemId}')" class="text-xs text-rose-600 underline">Hapus</button></td>
+      </tr>`).join("") || `<tr><td colspan="6" class="p-4 text-center text-slate-400">Belum ada referensi PO. Item ini diperlakukan sebagai Item Baru.</td></tr>`}
+      </tbody></table></div>
+    <div class="border-t pt-4">
+      <div class="text-sm font-medium mb-2">Tambah Referensi PO</div>
+      <div class="grid sm:grid-cols-5 gap-2">
+        <input id="p_vendor" placeholder="Nama vendor *" class="px-3 py-2 border rounded-lg sm:col-span-2">
+        <input id="p_po" placeholder="No. PO" class="px-3 py-2 border rounded-lg">
+        <input id="p_date" type="date" class="px-3 py-2 border rounded-lg">
+        <input id="p_price" type="number" step="0.01" placeholder="Harga satuan *" class="px-3 py-2 border rounded-lg">
+        <input id="p_notes" placeholder="Catatan" class="px-3 py-2 border rounded-lg sm:col-span-4">
+        <button onclick="addPrice('${itemId}')" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm">Tambah</button>
+      </div></div>`);
+}
+async function addPrice(itemId){
+  const payload = {
+    item_id:itemId, vendor_name:$("p_vendor").value.trim(),
+    po_number:$("p_po").value.trim() || null, po_date:$("p_date").value || null,
+    unit_price:Number($("p_price").value), notes:$("p_notes").value.trim() || null
+  };
+  if (!payload.vendor_name || !payload.unit_price) return toast("Vendor dan harga wajib diisi.", "err");
+  const { error } = await sb.from("vendor_prices").insert(payload);
+  if (error) return toast(error.message, "err");
+  await sb.from("items").update({ is_new_item:false }).eq("id", itemId);
+  await loadItems(); openPrices(itemId); toast("Referensi harga ditambahkan.");
+}
+async function delPrice(id, itemId){
+  if (!confirm("Hapus referensi harga ini?")) return;
+  const { error } = await sb.from("vendor_prices").delete().eq("id", id);
+  if (error) return toast(error.message, "err");
+  await loadItems(); openPrices(itemId);
+}
+
+/* ===================== RAB BUILDER ===================== */
+$("builderSearch").oninput = e => {
+  const q = e.target.value.toLowerCase().trim();
+  const box = $("builderResults");
+  if (q.length < 2){ box.classList.add("hidden"); return; }
+  const rows = S.items.filter(i => [i.code,i.name,i.category].join(" ").toLowerCase().includes(q)).slice(0,30);
+  box.innerHTML = rows.map(i => {
+    const p = priceRef(i);
+    return `<div class="p-2 hover:bg-slate-50 cursor-pointer flex justify-between gap-3" onclick="addLine('${i.id}')">
+      <div><div class="text-sm font-medium">${esc(i.name)}</div>
+        <div class="text-[11px] text-slate-400">${esc(i.code)} · ${esc(i.unit)} · ${esc(i.category||"-")}</div></div>
+      <div class="text-right text-xs whitespace-nowrap">
+        ${p.lowest ? `<div class="font-medium">${fmtRp(p.lowest.unit_price)}</div><div class="text-slate-400">terendah dr ${p.count} PO</div>`
+                   : `<span class="text-amber-600">Item Baru</span>`}</div></div>`;
+  }).join("") || `<div class="p-3 text-sm text-slate-400">Tidak ditemukan.</div>`;
+  box.classList.remove("hidden");
+};
+
+function addLine(itemId){
+  const it = S.items.find(x => x.id === itemId);
+  const p = priceRef(it);
+  S.draft.lines.push({
+    key:uid(), item_id:it.id, item_code:it.code, item_name:it.name, unit:it.unit,
+    description:it.description || "", qty:1,
+    unit_price: p.lowest ? Number(p.lowest.unit_price) : 0,
+    vendor_price_id: p.lowest ? p.lowest.id : null,
+    price_source: p.lowest ? "lowest" : "custom",
+    price_ref: p.lowest ? `${p.lowest.vendor_name}${p.lowest.po_number ? " / " + p.lowest.po_number : ""}` : "Harga kustom"
+  });
+  $("builderSearch").value = ""; $("builderResults").classList.add("hidden");
+  renderDraft();
+}
+$("btnAdHoc").onclick = () => {
+  const name = prompt("Nama item manual:"); if (!name) return;
+  S.draft.lines.push({ key:uid(), item_id:null, item_code:"MANUAL", item_name:name, unit:"Ls",
+    description:"", qty:1, unit_price:0, vendor_price_id:null, price_source:"custom", price_ref:"Harga kustom" });
+  renderDraft();
+};
+
+function renderDraft(){
+  const tb = $("draftBody");
+  $("draftEmpty").classList.toggle("hidden", S.draft.lines.length > 0);
+  tb.innerHTML = S.draft.lines.map((l,idx) => {
+    const it = S.items.find(x => x.id === l.item_id);
+    const vps = it ? (it.vendor_prices || []) : [];
+    const opts = vps.map(v => `<option value="${v.id}" ${l.vendor_price_id===v.id?"selected":""}>${esc(v.vendor_name)}${v.po_number?" · "+esc(v.po_number):""} — ${fmtRp(v.unit_price)}</option>`).join("");
+    return `<tr class="border-b align-top">
+      <td class="px-3 py-2 text-slate-400">${idx+1}</td>
+      <td class="px-3 py-2"><div class="font-medium">${esc(l.item_name)}</div>
+        <div class="text-[11px] text-slate-400 font-mono">${esc(l.item_code||"")}</div></td>
+      <td class="px-3 py-2"><input value="${esc(l.unit)}" onchange="upd('${l.key}','unit',this.value)" class="w-16 px-2 py-1 border rounded"></td>
+      <td class="px-3 py-2"><input type="number" step="0.01" value="${l.qty}" onchange="upd('${l.key}','qty',this.value)" class="w-20 px-2 py-1 border rounded text-right"></td>
+      <td class="px-3 py-2"><select onchange="pickPrice('${l.key}',this.value)" class="w-full px-2 py-1 border rounded bg-white text-xs">
+          ${opts}<option value="custom" ${l.price_source==="custom"?"selected":""}>— Harga kustom —</option>
+        </select>
+        <div class="text-[11px] text-slate-400 mt-1">${esc(l.price_ref||"")}</div></td>
+      <td class="px-3 py-2"><input type="number" step="0.01" value="${l.unit_price}" onchange="upd('${l.key}','unit_price',this.value)" class="w-32 px-2 py-1 border rounded text-right"></td>
+      <td class="px-3 py-2 text-right font-medium">${fmtRp(l.qty * l.unit_price)}</td>
+      <td class="px-3 py-2 text-right"><button onclick="delLine('${l.key}')" class="text-rose-500">&times;</button></td>
+    </tr>`;
+  }).join("");
+  recalc();
+}
+function upd(key, field, val){
+  const l = S.draft.lines.find(x => x.key === key);
+  l[field] = (field === "qty" || field === "unit_price") ? Number(val) : val;
+  if (field === "unit_price"){ l.price_source = "custom"; l.vendor_price_id = null; l.price_ref = "Harga kustom"; }
+  renderDraft();
+}
+function pickPrice(key, val){
+  const l = S.draft.lines.find(x => x.key === key);
+  if (val === "custom"){ l.price_source = "custom"; l.vendor_price_id = null; l.price_ref = "Harga kustom"; }
+  else {
+    const it = S.items.find(x => x.id === l.item_id);
+    const v = (it.vendor_prices || []).find(x => x.id === val);
+    l.unit_price = Number(v.unit_price); l.vendor_price_id = v.id; l.price_source = "po";
+    l.price_ref = `${v.vendor_name}${v.po_number ? " / " + v.po_number : ""}${v.po_date ? " / " + v.po_date : ""}`;
+  }
+  renderDraft();
+}
+function delLine(key){ S.draft.lines = S.draft.lines.filter(x => x.key !== key); renderDraft(); }
+
+function totals(){
+  const subtotal = S.draft.lines.reduce((s,l) => s + (Number(l.qty)||0) * (Number(l.unit_price)||0), 0);
+  const marginPct = Number($("inpMargin").value) || 0;
+  const taxPct = Number($("inpTax").value) || 0;
+  const margin = subtotal * marginPct / 100;
+  const tax = (subtotal + margin) * taxPct / 100;
+  return { subtotal, marginPct, taxPct, margin, tax, grand: subtotal + margin + tax };
+}
+function recalc(){
+  const t = totals();
+  $("sumSubtotal").textContent = fmtRp(t.subtotal);
+  $("sumMargin").textContent = fmtRp(t.margin);
+  $("sumTax").textContent = fmtRp(t.tax);
+  $("sumTotal").textContent = fmtRp(t.grand);
+}
+$("inpMargin").oninput = recalc;
+$("inpTax").oninput = recalc;
+
+$("btnResetRab").onclick = () => resetBuilder();
+function resetBuilder(){
+  S.draft = { id:null, lines:[] };
+  ["rabTitle","rabProject","rabNotes"].forEach(i => $(i).value = "");
+  $("rabDivision").value = S.profile.division || "";
+  $("rabStatus").value = "Draft"; $("inpMargin").value = 0; $("inpTax").value = 11;
+  $("rabEditBadge").classList.add("hidden");
+  renderDraft();
+}
+
+$("btnSaveRab").onclick = async () => {
+  const title = $("rabTitle").value.trim();
+  if (!title) return toast("Judul RAB wajib diisi.", "err");
+  if (!S.draft.lines.length) return toast("Minimal 1 item.", "err");
+  const t = totals();
+  const header = {
+    title, project_name:$("rabProject").value.trim() || null,
+    division:$("rabDivision").value.trim() || null, status:$("rabStatus").value,
+    notes:$("rabNotes").value.trim() || null,
+    tax_percent:t.taxPct, margin_percent:t.marginPct,
+    subtotal:t.subtotal, margin_amount:t.margin, tax_amount:t.tax, grand_total:t.grand
+  };
+
+  let rabId = S.draft.id;
+  if (rabId){
+    const { error } = await sb.from("rabs").update(header).eq("id", rabId);
+    if (error) return toast(error.message, "err");
+    await sb.from("rab_items").delete().eq("rab_id", rabId);
+  } else {
+    header.created_by = S.user.id;
+    const { data, error } = await sb.from("rabs").insert(header).select().single();
+    if (error) return toast(error.message, "err");
+    rabId = data.id;
+  }
+
+  const lines = S.draft.lines.map((l,i) => ({
+    rab_id:rabId, item_id:l.item_id, vendor_price_id:l.vendor_price_id,
+    item_code:l.item_code, item_name:l.item_name, unit:l.unit, description:l.description || null,
+    qty:Number(l.qty), unit_price:Number(l.unit_price),
+    price_source:l.price_source, price_ref:l.price_ref, sort_order:i
+  }));
+  const { error:e2 } = await sb.from("rab_items").insert(lines);
+  if (e2) return toast(e2.message, "err");
+
+  toast("RAB tersimpan."); S.draft.id = rabId;
+  $("rabEditBadge").classList.remove("hidden");
+  await loadRabs();
+};
+
+/* ===================== HISTORI ===================== */
+async function loadRabs(){
+  const { data, error } = await sb.from("rabs")
+    .select("*, profiles:created_by(email, division, full_name)")
+    .order("created_at", { ascending:false });
+  if (error){ toast(error.message, "err"); return; }
+  S.rabs = data || [];
+  renderHistory(); renderDashboard();
+}
+function renderHistory(){
+  const q = ($("histSearch").value || "").toLowerCase();
+  const st = $("histStatus").value;
+  const rows = S.rabs.filter(r =>
+    (!q || [r.title, r.project_name].join(" ").toLowerCase().includes(q)) && (!st || r.status === st));
+  $("histBody").innerHTML = rows.map(r => `<tr class="border-b hover:bg-slate-50">
+    <td class="px-3 py-2 font-medium">${esc(r.title)}</td>
+    <td class="px-3 py-2">${esc(r.project_name || "-")}</td>
+    <td class="px-3 py-2"><div>${esc(r.profiles?.email || "-")}</div>
+      <div class="text-[11px] text-slate-400">${esc(r.division || r.profiles?.division || "-")}</div></td>
+    <td class="px-3 py-2">${fmtDate(r.created_at)}</td>
+    <td class="px-3 py-2"><span class="text-xs px-2 py-1 rounded ${
+      r.status==="Approved" ? "bg-emerald-100 text-emerald-700" :
+      r.status==="Exported" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-600"}">${esc(r.status)}</span></td>
+    <td class="px-3 py-2 text-right font-medium">${fmtRp(r.grand_total)}</td>
+    <td class="px-3 py-2 text-right whitespace-nowrap text-xs">
+      <button onclick="viewRab('${r.id}')" class="underline">Detail</button>
+      <button onclick="editRab('${r.id}')" class="underline ml-2">Edit</button>
+      <button onclick="exportRab('${r.id}','xlsx')" class="underline ml-2">Excel</button>
+      <button onclick="exportRab('${r.id}','pdf')" class="underline ml-2">PDF</button>
+      <button onclick="delRab('${r.id}')" class="underline ml-2 text-rose-600">Hapus</button>
+    </td></tr>`).join("") || `<tr><td colspan="7" class="p-8 text-center text-slate-400">Belum ada RAB.</td></tr>`;
+}
+$("histSearch").oninput = renderHistory;
+$("histStatus").onchange = renderHistory;
+
+async function fetchRab(id){
+  const { data:r } = await sb.from("rabs").select("*, profiles:created_by(email, division, full_name)").eq("id", id).single();
+  const { data:lines } = await sb.from("rab_items").select("*").eq("rab_id", id).order("sort_order");
+  return { r, lines: lines || [] };
+}
+async function viewRab(id){
+  const { r, lines } = await fetchRab(id);
+  openModal(r.title, `
+    <div class="text-sm space-y-1 mb-4">
+      <div><b>Proyek:</b> ${esc(r.project_name||"-")}</div>
+      <div><b>Pembuat:</b> ${esc(r.profiles?.email||"-")} · ${esc(r.division||"-")}</div>
+      <div><b>Tanggal:</b> ${fmtDate(r.created_at)} · <b>Status:</b> ${esc(r.status)}</div>
+      ${r.notes ? `<div><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
+    </div>
+    <div class="scroll-x"><table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b"><tr>
+        <th class="px-2 py-2 text-left">Uraian</th><th class="px-2 py-2">Sat</th>
+        <th class="px-2 py-2 text-right">Qty</th><th class="px-2 py-2 text-right">Harga</th>
+        <th class="px-2 py-2 text-right">Subtotal</th></tr></thead>
+      <tbody>${lines.map(l => `<tr class="border-b">
+        <td class="px-2 py-2">${esc(l.item_name)}<div class="text-[11px] text-slate-400">${esc(l.price_ref||"")}</div></td>
+        <td class="px-2 py-2 text-center">${esc(l.unit||"")}</td>
+        <td class="px-2 py-2 text-right">${fmtNum(l.qty)}</td>
+        <td class="px-2 py-2 text-right">${fmtRp(l.unit_price)}</td>
+        <td class="px-2 py-2 text-right">${fmtRp(l.qty*l.unit_price)}</td></tr>`).join("")}</tbody>
+      <tfoot class="text-sm">
+        <tr><td colspan="4" class="px-2 py-1 text-right">Subtotal</td><td class="px-2 py-1 text-right">${fmtRp(r.subtotal)}</td></tr>
+        <tr><td colspan="4" class="px-2 py-1 text-right">Margin ${fmtNum(r.margin_percent)}%</td><td class="px-2 py-1 text-right">${fmtRp(r.margin_amount)}</td></tr>
+        <tr><td colspan="4" class="px-2 py-1 text-right">PPN ${fmtNum(r.tax_percent)}%</td><td class="px-2 py-1 text-right">${fmtRp(r.tax_amount)}</td></tr>
+        <tr class="font-bold border-t"><td colspan="4" class="px-2 py-2 text-right">TOTAL</td><td class="px-2 py-2 text-right">${fmtRp(r.grand_total)}</td></tr>
+      </tfoot></table></div>`);
+}
+async function editRab(id){
+  const { r, lines } = await fetchRab(id);
+  S.draft = { id:r.id, lines: lines.map(l => ({
+    key:uid(), item_id:l.item_id, item_code:l.item_code, item_name:l.item_name, unit:l.unit,
+    description:l.description || "", qty:Number(l.qty), unit_price:Number(l.unit_price),
+    vendor_price_id:l.vendor_price_id, price_source:l.price_source, price_ref:l.price_ref })) };
+  $("rabTitle").value = r.title; $("rabProject").value = r.project_name || "";
+  $("rabDivision").value = r.division || ""; $("rabStatus").value = r.status;
+  $("rabNotes").value = r.notes || ""; $("inpMargin").value = r.margin_percent; $("inpTax").value = r.tax_percent;
+  $("rabEditBadge").classList.remove("hidden");
+  renderDraft(); switchTab("builder");
+}
+async function delRab(id){
+  if (!confirm("Hapus RAB ini permanen?")) return;
+  const { error } = await sb.from("rabs").delete().eq("id", id);
+  if (error) return toast(error.message, "err");
+  toast("RAB dihapus."); loadRabs();
+}
+
+/* ===================== EXPORT ===================== */
+function draftAsRab(){
+  const t = totals();
+  return {
+    r:{ title:$("rabTitle").value || "RAB Tanpa Judul", project_name:$("rabProject").value,
+        division:$("rabDivision").value, status:$("rabStatus").value, notes:$("rabNotes").value,
+        created_at:new Date().toISOString(), profiles:{ email:S.profile.email },
+        subtotal:t.subtotal, margin_percent:t.marginPct, margin_amount:t.margin,
+        tax_percent:t.taxPct, tax_amount:t.tax, grand_total:t.grand },
+    lines: S.draft.lines
+  };
+}
+$("btnXlsDraft").onclick = () => { const d = draftAsRab(); toXlsx(d.r, d.lines); };
+$("btnPdfDraft").onclick = () => { const d = draftAsRab(); toPdf(d.r, d.lines); };
+async function exportRab(id, kind){
+  const { r, lines } = await fetchRab(id);
+  if (kind === "xlsx") toXlsx(r, lines); else toPdf(r, lines);
+  if (r.status === "Draft") { await sb.from("rabs").update({ status:"Exported" }).eq("id", id); loadRabs(); }
+}
+function safeName(s){ return String(s||"RAB").replace(/[^\w\s-]/g,"").trim().replace(/\s+/g,"_").slice(0,60); }
+
+function toXlsx(r, lines){
+  const aoa = [
+    ["RENCANA ANGGARAN BIAYA"], [],
+    ["Judul RAB", r.title], ["Nama Proyek", r.project_name || "-"],
+    ["Pembuat", r.profiles?.email || "-"], ["Divisi", r.division || "-"],
+    ["Tanggal", fmtDate(r.created_at)], ["Status", r.status || "-"],
+    ["Catatan", r.notes || "-"], [],
+    ["No","Kode","Uraian","Satuan","Qty","Harga Satuan","Subtotal","Acuan Harga"]
+  ];
+  lines.forEach((l,i) => aoa.push([ i+1, l.item_code || "", l.item_name, l.unit || "",
+    Number(l.qty), Number(l.unit_price), Number(l.qty)*Number(l.unit_price), l.price_ref || "" ]));
+  aoa.push([]);
+  aoa.push(["","","","","","Subtotal", Number(r.subtotal)]);
+  aoa.push(["","","","","",`Margin ${r.margin_percent}%`, Number(r.margin_amount)]);
+  aoa.push(["","","","","",`PPN ${r.tax_percent}%`, Number(r.tax_amount)]);
+  aoa.push(["","","","","","TOTAL", Number(r.grand_total)]);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:5},{wch:14},{wch:40},{wch:10},{wch:10},{wch:16},{wch:18},{wch:30}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "RAB");
+  XLSX.writeFile(wb, safeName(r.title) + ".xlsx");
+}
+
+function toPdf(r, lines){
+  const rows = lines.map((l,i) => `<tr>
+    <td style="text-align:center">${i+1}</td>
+    <td>${esc(l.item_name)}<div style="font-size:8pt;color:#777">${esc(l.price_ref||"")}</div></td>
+    <td style="text-align:center">${esc(l.unit||"")}</td>
+    <td style="text-align:right">${fmtNum(l.qty)}</td>
+    <td style="text-align:right">${fmtNum(l.unit_price)}</td>
+    <td style="text-align:right">${fmtNum(l.qty*l.unit_price)}</td></tr>`).join("");
+  $("pdfStage").innerHTML = `
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;padding:28px;">
+    <h2 style="margin:0 0 2px 0;">RENCANA ANGGARAN BIAYA</h2>
+    <div style="font-size:9pt;color:#555;margin-bottom:14px;">${esc(r.title)}</div>
+    <table style="width:100%;font-size:9pt;margin-bottom:12px;">
+      <tr><td style="width:90px;">Proyek</td><td>: ${esc(r.project_name||"-")}</td>
+          <td style="width:80px;">Tanggal</td><td>: ${fmtDate(r.created_at)}</td></tr>
+      <tr><td>Pembuat</td><td>: ${esc(r.profiles?.email||"-")}</td>
+          <td>Status</td><td>: ${esc(r.status||"-")}</td></tr>
+      <tr><td>Divisi</td><td colspan="3">: ${esc(r.division||"-")}</td></tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;font-size:9pt;">
+      <thead><tr style="background:#f1f5f9;">
+        <th style="border:1px solid #cbd5e1;padding:5px;width:28px;">No</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;text-align:left;">Uraian</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:55px;">Sat</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:60px;">Qty</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:90px;">Harga</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:100px;">Subtotal</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <table style="width:100%;font-size:9pt;margin-top:10px;">
+      <tr><td style="text-align:right;">Subtotal</td><td style="text-align:right;width:120px;">${fmtRp(r.subtotal)}</td></tr>
+      <tr><td style="text-align:right;">Margin ${fmtNum(r.margin_percent)}%</td><td style="text-align:right;">${fmtRp(r.margin_amount)}</td></tr>
+      <tr><td style="text-align:right;">PPN ${fmtNum(r.tax_percent)}%</td><td style="text-align:right;">${fmtRp(r.tax_amount)}</td></tr>
+      <tr><td style="text-align:right;font-weight:bold;border-top:1px solid #333;">TOTAL</td>
+          <td style="text-align:right;font-weight:bold;border-top:1px solid #333;">${fmtRp(r.grand_total)}</td></tr>
+    </table>
+    ${r.notes ? `<div style="margin-top:12px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
+    <table style="width:100%;margin-top:40px;font-size:9pt;text-align:center;">
+      <tr><td>Dibuat oleh</td><td>Diperiksa</td><td>Disetujui</td></tr>
+      <tr><td style="height:60px;"></td><td></td><td></td></tr>
+      <tr><td>(${esc(r.profiles?.email||"")})</td><td>(..................)</td><td>(..................)</td></tr>
+    </table>
+  </div>`;
+  html2pdf().set({
+    margin:0, filename:safeName(r.title)+".pdf",
+    image:{ type:"jpeg", quality:0.95 },
+    html2canvas:{ scale:2, useCORS:true },
+    jsPDF:{ unit:"mm", format:"a4", orientation:"portrait" },
+    pagebreak:{ mode:["css","legacy"] }
+  }).from($("pdfStage").firstElementChild).save();
+}
+
+/* ===================== DASHBOARD ===================== */
+function renderDashboard(){
+  if (!S.profile) return;
+  $("statItems").textContent = S.items.length;
+  $("statPrices").textContent = S.items.reduce((s,i) => s + (i.vendor_prices?.length || 0), 0);
+  $("statRabs").textContent = S.rabs.length;
+  $("statValue").textContent = fmtRp(S.rabs.reduce((s,r) => s + Number(r.grand_total||0), 0));
+  $("dashRecent").innerHTML = S.rabs.slice(0,5).map(r => `
+    <div class="flex justify-between items-center py-2 border-b last:border-0">
+      <div><div class="font-medium text-slate-800">${esc(r.title)}</div>
+        <div class="text-xs text-slate-400">${esc(r.profiles?.email||"-")} · ${fmtDate(r.created_at)}</div></div>
+      <div class="text-right"><div class="font-medium">${fmtRp(r.grand_total)}</div>
+        <div class="text-xs text-slate-400">${esc(r.status)}</div></div></div>`).join("")
+    || `<div class="text-slate-400">Belum ada RAB.</div>`;
+}
+
+/* ===================== MANAJEMEN USER ===================== */
+async function loadUsers(){
+  const { data, error } = await sb.from("profiles").select("*").order("created_at");
+  if (error) return;
+  S.users = data || []; renderUsers();
+}
+function renderUsers(){
+  $("usersBody").innerHTML = S.users.map(u => `<tr class="border-b">
+    <td class="px-3 py-2">${esc(u.email)}</td>
+    <td class="px-3 py-2">${esc(u.full_name||"-")}</td>
+    <td class="px-3 py-2"><input value="${esc(u.division||"")}" onchange="updUser('${u.id}','division',this.value)" class="px-2 py-1 border rounded w-36"></td>
+    <td class="px-3 py-2"><select onchange="updUser('${u.id}','role',this.value)" class="px-2 py-1 border rounded bg-white">
+      <option value="user" ${u.role==="user"?"selected":""}>user</option>
+      <option value="admin" ${u.role==="admin"?"selected":""}>admin</option></select></td>
+    <td class="px-3 py-2"><input type="checkbox" ${u.is_active?"checked":""} onchange="updUser('${u.id}','is_active',this.checked)"></td>
+  </tr>`).join("");
+}
+async function updUser(id, field, val){
+  const { error } = await sb.from("profiles").update({ [field]: val }).eq("id", id);
+  if (error) return toast(error.message, "err");
+  toast("Profil diperbarui."); loadUsers();
+}
+$("userForm").onsubmit = async e => {
+  e.preventDefault();
+  const email = $("newEmail").value.trim(), pass = $("newPass").value;
+  const { data, error } = await sbProv.auth.signUp({
+    email, password:pass,
+    options:{ data:{ full_name:$("newName").value.trim(), division:$("newDiv").value.trim() } }
+  });
+  if (error) return toast(error.message, "err");
+  const newId = data.user?.id;
+  if (newId){
+    await sb.from("profiles").update({
+      role:$("newRole").value, division:$("newDiv").value.trim() || null,
+      full_name:$("newName").value.trim() || null
+    }).eq("id", newId);
+  }
+  await sbProv.auth.signOut();
+  e.target.reset(); toast("Akun dibuat: " + email); loadUsers();
+};
+
+/* ===================== INIT ===================== */
+(async () => {
+  try { lucide.createIcons(); } catch(_) {}
+  const { data } = await sb.auth.getSession();
+  if (data.session?.user){ S.user = data.session.user; await bootApp(); }
+})();
+</script>
+</body>
+</html>
