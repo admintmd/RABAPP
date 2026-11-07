@@ -169,6 +169,12 @@
                 <input id="rabCreator" disabled class="inp mt-1 opacity-70"></div>
               <div><label class="lbl">Status</label><select id="rabStatus" class="inp mt-1">
                 <option>Draft</option><option>Approved</option><option>Exported</option></select></div>
+              <div><label class="lbl">Jenis RAB *</label>
+                <select id="rabWorkType" class="inp mt-1">
+                  <option value="Pekerjaan">Pekerjaan &mdash; "Pengadaan dan pemasangan / penarikan ..."</option>
+                  <option value="Pengadaan Stok">Pengadaan Stok &mdash; "Pengadaan ..."</option>
+                </select>
+                <p class="text-[11px] muted mt-1">Awalan otomatis pada nama barang. Item yang namanya diawali "Kabel" memakai <b>penarikan</b>, bukan pemasangan. Item bertipe Jasa tidak diberi awalan.</p></div>
               <div class="sm:col-span-2"><label class="lbl">Catatan</label><textarea id="rabNotes" rows="2" class="inp mt-1"></textarea></div>
             </div>
           </div>
@@ -1169,12 +1175,38 @@ $("builderSearch").oninput = e => {
 function addLine(itemId){
   const it = S.items.find(x => x.id === itemId), p = priceRef(it);
   if (p.ref == null) return toast("Item ini belum punya harga di master. Lengkapi PO atau Harga Estimasi dulu.", "err");
-  S.draft.lines.push({ key:uid(), item_id:it.id, item_code:it.code, item_name:it.name, unit:it.unit,
+  S.draft.lines.push({ key:uid(), item_id:it.id, item_code:it.code, item_name:it.name,
+    item_type:it.item_type || "Barang", unit:it.unit,
     description:it.description||"", qty:1, unit_price:p.ref,
     vendor_price_id: p.last ? p.last.id : null,
     price_source: p.last ? "po" : "estimate", price_ref: p.refLabel });
   $("builderSearch").value = ""; $("builderResults").classList.add("hidden");
   renderDraft();
+}
+function itemTypeOf(itemId){
+  const it = S.items.find(x => x.id === itemId);
+  return it ? (it.item_type || "Barang") : "Barang";
+}
+function stripPrefix(nama){
+  const n = String(nama||"");
+  const low = n.toLowerCase();
+  for (const p of ["pengadaan dan pemasangan ", "pengadaan dan penarikan ", "pengadaan "]){
+    if (low.indexOf(p) === 0){
+      const sisa = n.slice(p.length);
+      return sisa.charAt(0).toUpperCase() + sisa.slice(1);
+    }
+  }
+  return n;
+}
+function isKabel(nama){ return /^kabel\b/i.test(String(nama||"").trim()); }
+function workPrefix(nama){
+  if ($("rabWorkType").value === "Pengadaan Stok") return "Pengadaan ";
+  // Kabel ditarik, bukan dipasang
+  return isKabel(nama) ? "Pengadaan dan penarikan " : "Pengadaan dan pemasangan ";
+}
+function lineLabel(l){
+  if (l.item_type === "Jasa") return l.item_name;
+  return workPrefix(l.item_name) + l.item_name.charAt(0).toLowerCase() + l.item_name.slice(1);
 }
 function renderDraft(){
   $("draftEmpty").classList.toggle("hidden", S.draft.lines.length > 0);
@@ -1186,7 +1218,7 @@ function renderDraft(){
       ? `<option value="estimate" ${l.price_source==="estimate"?"selected":""}>Harga estimasi master — ${fmtRp(it.estimate_price)}</option>` : "";
     return `<tr class="row align-top">
       <td class="px-3 py-2 muted">${idx+1}</td>
-      <td class="px-3 py-2"><div class="font-medium">${esc(l.item_name)}</div>
+      <td class="px-3 py-2"><div class="font-medium">${esc(lineLabel(l))}</div>
         <div class="text-[11px] muted font-mono">${esc(l.item_code||"")}</div></td>
       <td class="px-3 py-2">${esc(l.unit||"")}</td>
       <td class="px-3 py-2"><input type="number" step="0.01" min="0" value="${l.qty}" onchange="updQty('${l.key}',this.value)" class="inp-sm w-20 text-right"></td>
@@ -1225,12 +1257,13 @@ function recalc(){
   $("sumTotal").textContent = fmtRp(t.grand);
 }
 $("inpTax").oninput = recalc;
+$("rabWorkType").onchange = renderDraft;
 $("btnResetRab").onclick = () => resetBuilder();
 function resetBuilder(){
   S.draft = { id:null, lines:[] };
   ["rabTitle","rabProject","rabNotes","rabLocation"].forEach(i => $(i).value = "");
   setRabMeta(S.profile.division, S.profile.full_name ? (S.profile.full_name + " (" + S.profile.email + ")") : S.profile.email);
-  $("rabStatus").value = "Draft"; $("inpTax").value = 11;
+  $("rabStatus").value = "Draft"; $("inpTax").value = 11; $("rabWorkType").value = "Pekerjaan";
   $("rabEditBadge").classList.add("hidden"); renderDraft();
 }
 $("btnSaveRab").onclick = async () => {
@@ -1240,7 +1273,7 @@ $("btnSaveRab").onclick = async () => {
   if (!S.draft.lines.length) return toast("Minimal 1 item.", "err");
   const t = totals();
   const header = { title:title, project_name:$("rabProject").value.trim()||null,
-    location:$("rabLocation").value.trim()||null,
+    location:$("rabLocation").value.trim()||null, work_type:$("rabWorkType").value,
     division: rabDivisionValue(), status:$("rabStatus").value,
     notes:$("rabNotes").value.trim()||null, tax_percent:t.taxPct, margin_percent:0,
     subtotal:t.subtotal, margin_amount:0, tax_amount:t.tax, grand_total:t.grand };
@@ -1256,7 +1289,7 @@ $("btnSaveRab").onclick = async () => {
     rabId = data.id;
   }
   const lines = S.draft.lines.map((l,i) => ({ rab_id:rabId, item_id:l.item_id, vendor_price_id:l.vendor_price_id,
-    item_code:l.item_code, item_name:l.item_name, unit:l.unit, description:l.description||null,
+    item_code:l.item_code, item_name:lineLabel(l), unit:l.unit, description:l.description||null,
     qty:Number(l.qty), unit_price:Number(l.unit_price), price_source:l.price_source,
     price_ref:l.price_ref, sort_order:i }));
   const { error:e2 } = await sb.from("rab_items").insert(lines);
@@ -1358,11 +1391,13 @@ async function viewRab(id){
 async function editRab(id){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
   S.draft = { id:r.id, lines: lines.map(l => ({ key:uid(), item_id:l.item_id, item_code:l.item_code,
-    item_name:l.item_name, unit:l.unit, description:l.description||"", qty:Number(l.qty),
+    item_name:stripPrefix(l.item_name), item_type:itemTypeOf(l.item_id),
+    unit:l.unit, description:l.description||"", qty:Number(l.qty),
     unit_price:Number(l.unit_price), vendor_price_id:l.vendor_price_id,
     price_source:l.price_source, price_ref:l.price_ref })) };
   $("rabTitle").value = r.title; $("rabProject").value = r.project_name||"";
   $("rabLocation").value = r.location||"";
+  $("rabWorkType").value = r.work_type || "Pekerjaan";
   setRabMeta(r.division, r.profiles ? r.profiles.email : "-"); $("rabStatus").value = r.status;
   $("rabNotes").value = r.notes||""; $("inpTax").value = r.tax_percent;
   $("rabEditBadge").classList.remove("hidden"); renderDraft(); switchTab("builder");
@@ -1384,8 +1419,11 @@ function draftAsRab(){
       subtotal:t.subtotal, tax_percent:t.taxPct, tax_amount:t.tax, grand_total:t.grand },
     lines: S.draft.lines };
 }
-$("btnXlsDraft").onclick = () => { const d = draftAsRab(); toXlsx(d.r, d.lines); };
-$("btnPdfDraft").onclick = () => { const d = draftAsRab(); toPdf(d.r, d.lines); };
+function draftLinesForExport(){
+  return S.draft.lines.map(l => Object.assign({}, l, { item_name: lineLabel(l) }));
+}
+$("btnXlsDraft").onclick = () => { const d = draftAsRab(); toXlsx(d.r, draftLinesForExport()); };
+$("btnPdfDraft").onclick = () => { const d = draftAsRab(); toPdf(d.r, draftLinesForExport()); };
 async function exportRab(id, kind){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
   if (kind === "xlsx") toXlsx(r, lines); else toPdf(r, lines);
