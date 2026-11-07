@@ -9,7 +9,6 @@
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script>tailwind.config = { darkMode: 'class' };</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <style type="text/tailwindcss">
@@ -1587,47 +1586,302 @@ $("btnXlsDraft").onclick = () => { const d = draftAsRab(); toXlsx(d.r, draftLine
 $("btnPdfDraft").onclick = () => { const d = draftAsRab(); toPdf(d.r, draftLinesForExport()); };
 async function exportRab(id, kind){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
-  if (kind === "xlsx") toXlsx(r, lines); else toPdf(r, lines);
+  if (kind === "xlsx") toXlsx(r, lines); else await toPdf(r, lines);
   if (r.status === "Draft"){ await sb.from("rabs").update({ status:"Exported" }).eq("id", id); loadRabs(); }
 }
 function safeName(s){ return String(s||"RAB").replace(/[^\w\s-]/g,"").trim().replace(/\s+/g,"_").slice(0,60); }
-function toXlsx(r, lines){
-  const aoa = [["RENCANA ANGGARAN BIAYA"],[],
-    ["Tujuan Pembelian", r.title], ["Nama Pekerjaan/Pengadaan", r.project_name||"-"],
-    ["Lokasi Penempatan", r.location||"-"],
-    ["Pembuat", r.profiles ? r.profiles.email : "-"], ["Dept / Divisi", r.division||"-"],
-    ["Tanggal", fmtDate(r.created_at)], ["Status", r.status||"-"], ["Catatan", r.notes||"-"], [],
-    ["No","Kode","Uraian","Satuan","Qty","Harga Satuan","Subtotal","Acuan Harga"]];
-  lines.forEach((l,i) => aoa.push([i+1, l.item_code||"", l.item_name, l.unit||"", Number(l.qty),
-    Number(l.unit_price), Number(l.qty)*Number(l.unit_price), l.price_ref||""]));
-  aoa.push([]);
-  aoa.push(["","","","","","Subtotal", Number(r.subtotal)]);
-  aoa.push(["","","","","","PPN " + r.tax_percent + "%", Number(r.tax_amount)]);
-  aoa.push(["","","","","","TOTAL", Number(r.grand_total)]);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:5},{wch:14},{wch:40},{wch:10},{wch:10},{wch:16},{wch:18},{wch:32}];
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RAB");
-  XLSX.writeFile(wb, safeName(r.title)+".xlsx");
+/* =====================================================================
+   PENULIS XLSX MANDIRI — tanpa pustaka eksternal.
+   Berkas .xlsx hanyalah arsip ZIP berisi XML. ZIP ditulis dengan
+   metode "store" (tanpa kompresi) sehingga tidak butuh pustaka apa pun.
+   ===================================================================== */
+const CRC_TBL = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++){
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf){
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) c = CRC_TBL[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
 }
-function toPdf(r, lines){
+function zipStore(files){
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  const u16 = n => [n & 255, (n >> 8) & 255];
+  const u32 = n => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255];
+
+  files.forEach(f => {
+    const nameB = enc.encode(f.name);
+    const data  = enc.encode(f.data);
+    const crc = crc32(data), len = data.length;
+    const lh = [].concat([0x50,0x4b,0x03,0x04], u16(20), u16(0), u16(0), u16(0), u16(0),
+                         u32(crc), u32(len), u32(len), u16(nameB.length), u16(0));
+    parts.push(new Uint8Array(lh), nameB, data);
+    central.push([].concat([0x50,0x4b,0x01,0x02], u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+                           u32(crc), u32(len), u32(len), u16(nameB.length),
+                           u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)));
+    central.push(nameB);
+    offset += lh.length + nameB.length + len;
+  });
+
+  const cdParts = [];
+  let cdLen = 0;
+  for (let i = 0; i < central.length; i += 2){
+    const h = new Uint8Array(central[i]), n = central[i+1];
+    cdParts.push(h, n); cdLen += h.length + n.length;
+  }
+  const eocd = new Uint8Array([].concat([0x50,0x4b,0x05,0x06], u16(0), u16(0),
+                 u16(files.length), u16(files.length), u32(cdLen), u32(offset), u16(0)));
+  return new Blob(parts.concat(cdParts, [eocd]),
+    { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+const xe = v => String(v == null ? "" : v)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&apos;")
+  .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,"");
+const COL = n => { let s = ""; while (n > 0){ const m = (n-1) % 26; s = String.fromCharCode(65+m) + s; n = (n-1-m)/26; } return s; };
+
+/* Gaya (indeks mengacu ke cellXfs di styles.xml di bawah)
+   1 judul | 2 label | 3 nilai | 4 header | 5 teks | 6 tengah | 7 angka | 8 acuan
+   9 teks-zebra | 10 tengah-zebra | 11 angka-zebra | 12 acuan-zebra
+   13 rekap-label | 14 rekap-angka | 15 total-label | 16 total-angka            */
+const XLSX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0"/></numFmts>
+<fonts count="6">
+<font><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><sz val="9"/><color rgb="FF666666"/><name val="Calibri"/></font>
+<font><b/><sz val="12"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+</fonts>
+<fills count="5">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF1B2A4A"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEEF2F7"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF7F9FC"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="2">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF999999"/></left><right style="thin"><color rgb="FF999999"/></right><top style="thin"><color rgb="FF999999"/></top><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="17">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>
+<xf numFmtId="164" fontId="0" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+<xf numFmtId="164" fontId="2" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="5" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+<xf numFmtId="164" fontId="5" fillId="2" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+function xlsxCell(ref, style, value, isNum){
+  if (isNum) return `<c r="${ref}" s="${style}"><v>${Number(value)||0}</v></c>`;
+  if (value === "" || value == null) return `<c r="${ref}" s="${style}"/>`;
+  return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xe(value)}</t></is></c>`;
+}
+
+function toXlsx(r, lines){
+  const LEBAR = [5, 13, 52, 9, 9, 16, 17, 34];
+  const merges = [], rowsXml = [];
+  let nr = 1;
+
+  const pushRow = (cells, opt) => {
+    const o = opt || {};
+    rowsXml.push(`<row r="${nr}"${o.ht ? ` ht="${o.ht}" customHeight="1"` : ""}>${cells.join("")}</row>`);
+    nr++;
+  };
+
+  // Judul
+  merges.push(`A1:H1`);
+  pushRow([xlsxCell("A1", 1, "RENCANA ANGGARAN BIAYA")].concat(
+    [2,3,4,5,6,7,8].map(c => xlsxCell(COL(c)+"1", 1, ""))), { ht:26 });
+
+  pushRow([]);                                    // baris kosong
+
+  // Informasi (tanpa pembuat & status)
+  const info = [
+    ["Tujuan Pembelian", r.title || "-"],
+    ["Nama Pekerjaan / Pengadaan", r.project_name || "-"],
+    ["Lokasi Penempatan", r.location || "-"],
+    ["Dept / Divisi", r.division || "-"],
+    ["Tanggal", fmtDate(r.created_at)]
+  ];
+  if (r.notes) info.push(["Catatan", r.notes]);
+  info.forEach(([k, v]) => {
+    merges.push(`B${nr}:H${nr}`);
+    pushRow([ xlsxCell("A"+nr, 2, k), xlsxCell("B"+nr, 3, v) ].concat(
+      [3,4,5,6,7,8].map(c => xlsxCell(COL(c)+nr, 3, ""))));
+  });
+
+  pushRow([]);
+
+  // Header tabel
+  const hRow = nr;
+  const HDR = ["No","Kode","Uraian","Satuan","Qty","Harga Satuan","Subtotal","Acuan Harga"];
+  pushRow(HDR.map((h, i) => xlsxCell(COL(i+1)+hRow, 4, h)), { ht:22 });
+
+  // Isi
+  lines.forEach((l, i) => {
+    const z = (i % 2 === 1) ? 4 : 0;         // offset gaya zebra
+    const sub = Number(l.qty) * Number(l.unit_price);
+    pushRow([
+      xlsxCell("A"+nr, 6+z, i+1, true),
+      xlsxCell("B"+nr, 5+z, l.item_code || ""),
+      xlsxCell("C"+nr, 5+z, l.item_name),
+      xlsxCell("D"+nr, 6+z, l.unit || ""),
+      xlsxCell("E"+nr, 7+z, Number(l.qty), true),
+      xlsxCell("F"+nr, 7+z, Number(l.unit_price), true),
+      xlsxCell("G"+nr, 7+z, sub, true),
+      xlsxCell("H"+nr, 8+z, l.price_ref || "")
+    ]);
+  });
+
+  // Rekap
+  [["Subtotal", Number(r.subtotal), false],
+   ["PPN " + fmtNum(r.tax_percent) + "%", Number(r.tax_amount), false],
+   ["TOTAL", Number(r.grand_total), true]
+  ].forEach(([label, nilai, total]) => {
+    const sl = total ? 15 : 13, sv = total ? 16 : 14;
+    merges.push(`A${nr}:F${nr}`);
+    pushRow([ xlsxCell("A"+nr, sl, label) ]
+      .concat([2,3,4,5,6].map(c => xlsxCell(COL(c)+nr, sl, "")))
+      .concat([ xlsxCell("G"+nr, sv, nilai, true), xlsxCell("H"+nr, sl, "") ]),
+      total ? { ht:22 } : undefined);
+  });
+
+  const cols = LEBAR.map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join("");
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetViews><sheetView showGridLines="0" workbookViewId="0">
+<pane ySplit="${hRow}" topLeftCell="A${hRow+1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols>${cols}</cols>
+<sheetData>${rowsXml.join("")}</sheetData>
+<autoFilter ref="A${hRow}:H${hRow}"/>
+<mergeCells count="${merges.length}">${merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells>
+<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>
+<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/>
+</worksheet>`;
+
+  const files = [
+    { name:"[Content_Types].xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>` },
+    { name:"_rels/.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>` },
+    { name:"xl/workbook.xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="RAB" sheetId="1" r:id="rId1"/></sheets>
+</workbook>` },
+    { name:"xl/_rels/workbook.xml.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name:"xl/styles.xml", data: XLSX_STYLES },
+    { name:"xl/worksheets/sheet1.xml", data: sheet }
+  ];
+
+  const blob = zipStore(files);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = safeName(r.title) + ".xlsx";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function pdfNode(html){
+  const d = document.createElement("div");
+  d.style.width = "794px";          // A4 pada 96 dpi
+  d.style.background = "#fff";
+  d.innerHTML = html;
+  return d;
+}
+
+/* Render tiap halaman satu per satu lalu gabung ke satu berkas PDF.
+   Dipakai agar tidak ada halaman kosong dan tabel panjang terpotong rapi. */
+async function renderPdf(nodes, filename){
+  const JsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  const pdf = new JsPDF({ unit:"mm", format:"a4", orientation:"portrait" });
+  const PW = 210, PH = 297;
+  const stage = $("pdfStage");
+  let pertama = true;
+
+  for (const node of nodes){
+    stage.innerHTML = "";
+    stage.appendChild(node);
+    await new Promise(r => setTimeout(r, 60));
+
+    const canvas = await html2canvas(node, {
+      scale: 2, backgroundColor: "#ffffff", useCORS: true,
+      windowWidth: 794, width: 794
+    });
+
+    const pxPerMm = canvas.width / PW;
+    const pageHpx = Math.floor(PH * pxPerMm);
+    let y = 0;
+    while (y < canvas.height - 2){
+      const h = Math.min(pageHpx, canvas.height - y);
+      const c = document.createElement("canvas");
+      c.width = canvas.width; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+      if (!pertama) pdf.addPage();
+      pertama = false;
+      pdf.addImage(c.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, PW, h / pxPerMm);
+      y += h;
+    }
+  }
+  stage.innerHTML = "";
+  pdf.save(filename);
+}
+
+async function toPdf(r, lines){
   const BD = "1px solid #000";
   const tgl = new Date(r.created_at || Date.now())
     .toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
 
-  /* ---------- HALAMAN 1 : FORMULIR P2B ---------- */
-  const p2b = `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#000;padding:26px;background:#fff;">
-    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+  /* ================= HALAMAN 1 : FORMULIR P2B ================= */
+  const p2b = pdfNode(`
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#000;padding:30px;background:#fff;">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">
       <tr>
         <td style="vertical-align:top;">
-          <div style="font-size:20pt;font-weight:bold;letter-spacing:-0.5px;">
-            <span style="color:#1b2a4a;">LippoLand</span> <span style="color:#e23b2e;">TMD</span>
-          </div>
-          <table style="margin-top:10px;font-size:11pt;">
+          <table style="font-size:11pt;">
             <tr><td style="font-weight:bold;width:52px;">TGL</td><td>:</td>
                 <td style="border-bottom:1px dotted #000;padding:0 10px;">${esc(tgl)}</td></tr>
-            <tr><td style="font-weight:bold;padding-top:6px;">DEPT</td><td style="padding-top:6px;">:</td>
-                <td style="border-bottom:1px dotted #000;padding:6px 10px 0 10px;">${esc(r.division || "-")}</td></tr>
+            <tr><td style="font-weight:bold;padding-top:8px;">DEPT</td><td style="padding-top:8px;">:</td>
+                <td style="border-bottom:1px dotted #000;padding:8px 10px 0 10px;">${esc(r.division || "-")}</td></tr>
           </table>
         </td>
         <td style="vertical-align:top;width:48%;">
@@ -1640,77 +1894,85 @@ function toPdf(r, lines){
     </table>
 
     <table style="width:100%;border-collapse:collapse;border:${BD};">
-      <tr><td colspan="4" style="border:${BD};padding:4px 6px;">
+      <tr><td colspan="4" style="border:${BD};padding:5px 7px;">
         <div style="font-size:8pt;font-weight:bold;">TUJUAN PEMBELIAN:</div>
-        <div style="font-size:13pt;padding:2px 0 4px 2px;">${esc(r.title || "-")}</div></td></tr>
-      <tr><td colspan="4" style="border:${BD};padding:4px 6px;">
+        <div style="font-size:13pt;padding:3px 0 5px 2px;">${esc(r.title || "-")}</div></td></tr>
+      <tr><td colspan="4" style="border:${BD};padding:5px 7px;">
         <div style="font-size:8pt;font-weight:bold;">LOKASI PENEMPATAN:</div>
-        <div style="font-size:13pt;padding:2px 0 4px 2px;">${esc(r.location || "-")}</div></td></tr>
+        <div style="font-size:13pt;padding:3px 0 5px 2px;">${esc(r.location || "-")}</div></td></tr>
       <tr style="font-size:9pt;font-weight:bold;text-align:center;">
-        <td style="border:${BD};padding:5px;width:36px;">No.</td>
-        <td style="border:${BD};padding:5px;">NAMA BARANG</td>
-        <td style="border:${BD};padding:5px;width:62px;">QTY</td>
-        <td style="border:${BD};padding:5px;width:150px;">KETERANGAN</td></tr>
+        <td style="border:${BD};padding:6px;width:38px;">No.</td>
+        <td style="border:${BD};padding:6px;">NAMA BARANG</td>
+        <td style="border:${BD};padding:6px;width:64px;">QTY</td>
+        <td style="border:${BD};padding:6px;width:155px;">KETERANGAN</td></tr>
       <tr style="font-size:12pt;">
-        <td style="border:${BD};padding:8px 5px;text-align:center;vertical-align:top;">1</td>
-        <td style="border:${BD};padding:8px;vertical-align:top;height:250px;">${esc(r.project_name || r.title || "-")}</td>
-        <td style="border:${BD};padding:8px 5px;text-align:center;vertical-align:top;">1 Lot</td>
-        <td style="border:${BD};padding:8px;vertical-align:top;">RAB terlampir</td></tr>
-      <tr style="font-size:8pt;font-weight:bold;text-align:center;">
-        <td colspan="2" style="border:${BD};padding:5px;text-align:left;">DIMINTA :</td>
-        <td colspan="1" style="border:${BD};padding:5px;text-align:left;">DIPERIKSA :</td>
-        <td style="border:${BD};padding:5px;">DISETUJUI :</td></tr>
+        <td style="border:${BD};padding:9px 5px;text-align:center;vertical-align:top;">1</td>
+        <td style="border:${BD};padding:9px;vertical-align:top;height:300px;">${esc(r.project_name || r.title || "-")}</td>
+        <td style="border:${BD};padding:9px 5px;text-align:center;vertical-align:top;">1 Lot</td>
+        <td style="border:${BD};padding:9px;vertical-align:top;">RAB terlampir</td></tr>
+      <tr style="font-size:8pt;font-weight:bold;">
+        <td colspan="2" style="border:${BD};padding:6px;">DIMINTA :</td>
+        <td style="border:${BD};padding:6px;">DIPERIKSA :</td>
+        <td style="border:${BD};padding:6px;">DISETUJUI :</td></tr>
       <tr>
-        <td colspan="2" style="border:${BD};height:95px;"></td>
-        <td style="border:${BD};height:95px;"></td>
-        <td style="border:${BD};height:95px;"></td></tr>
+        <td colspan="2" style="border:${BD};height:100px;"></td>
+        <td style="border:${BD};height:100px;"></td>
+        <td style="border:${BD};height:100px;"></td></tr>
     </table>
-  </div>`;
+  </div>`);
 
-  /* ---------- HALAMAN 2 : LAMPIRAN RAB ---------- */
+  /* ================= HALAMAN 2 : PERHITUNGAN RAB ================= */
   const rows = lines.map((l,i) => `<tr>
-    <td style="border:1px solid #cbd5e1;padding:4px;text-align:center">${i+1}</td>
-    <td style="border:1px solid #cbd5e1;padding:4px">${esc(l.item_name)}<div style="font-size:8pt;color:#777">${esc(l.price_ref||"")}</div></td>
-    <td style="border:1px solid #cbd5e1;padding:4px;text-align:center">${esc(l.unit||"")}</td>
-    <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.qty)}</td>
-    <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.unit_price)}</td>
-    <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.qty*l.unit_price)}</td></tr>`).join("");
+    <td style="border:1px solid #999;padding:5px;text-align:center">${i+1}</td>
+    <td style="border:1px solid #999;padding:5px">${esc(l.item_name)}${l.price_ref ? `<div style="font-size:7.5pt;color:#777">${esc(l.price_ref)}</div>` : ""}</td>
+    <td style="border:1px solid #999;padding:5px;text-align:center">${esc(l.unit||"")}</td>
+    <td style="border:1px solid #999;padding:5px;text-align:right">${fmtNum(l.qty)}</td>
+    <td style="border:1px solid #999;padding:5px;text-align:right">${fmtNum(l.unit_price)}</td>
+    <td style="border:1px solid #999;padding:5px;text-align:right">${fmtNum(l.qty*l.unit_price)}</td></tr>`).join("");
 
-  const lampiran = `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;padding:26px;background:#fff;">
-    <div style="text-align:center;font-weight:bold;font-size:12pt;margin-bottom:12px;">
-      LAMPIRAN &mdash; RENCANA ANGGARAN BIAYA</div>
-    <table style="width:100%;font-size:9pt;margin-bottom:10px;">
-      <tr><td style="width:120px;">Tujuan Pembelian</td><td>: ${esc(r.title||"-")}</td></tr>
-      <tr><td>Pekerjaan</td><td>: ${esc(r.project_name||"-")}</td></tr>
+  const lampiran = pdfNode(`
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;padding:30px;background:#fff;">
+    <div style="text-align:center;font-weight:bold;font-size:13pt;margin-bottom:4px;">
+      PERHITUNGAN RENCANA ANGGARAN BIAYA</div>
+    <div style="text-align:center;font-size:10pt;margin-bottom:16px;">${esc(r.project_name || r.title || "")}</div>
+
+    <table style="width:100%;font-size:9pt;margin-bottom:12px;">
+      <tr><td style="width:130px;">Tujuan Pembelian</td><td>: ${esc(r.title||"-")}</td></tr>
       <tr><td>Lokasi Penempatan</td><td>: ${esc(r.location||"-")}</td></tr>
       <tr><td>Dept / Divisi</td><td>: ${esc(r.division||"-")}</td></tr>
       <tr><td>Tanggal</td><td>: ${esc(tgl)}</td></tr>
     </table>
+
     <table style="width:100%;border-collapse:collapse;font-size:9pt;">
       <thead><tr style="background:#1b2a4a;color:#fff;">
-        <th style="border:1px solid #cbd5e1;padding:5px;width:28px;">No</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;text-align:left;">Uraian</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:55px;">Sat</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:60px;">Vol</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:90px;">Harga Satuan</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:100px;">Total Harga</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-    <table style="width:100%;font-size:9pt;margin-top:10px;">
-      <tr><td style="text-align:right;">Subtotal</td><td style="text-align:right;width:130px;">${fmtRp(r.subtotal)}</td></tr>
-      <tr><td style="text-align:right;">PPN ${fmtNum(r.tax_percent)}%</td><td style="text-align:right;">${fmtRp(r.tax_amount)}</td></tr>
-      <tr><td style="text-align:right;font-weight:bold;border-top:1px solid #333;">TOTAL</td>
-          <td style="text-align:right;font-weight:bold;border-top:1px solid #333;">${fmtRp(r.grand_total)}</td></tr></table>
-    ${r.notes ? `<div style="margin-top:12px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
-  </div>`;
+        <th style="border:1px solid #999;padding:6px;width:30px;">No</th>
+        <th style="border:1px solid #999;padding:6px;text-align:left;">Uraian</th>
+        <th style="border:1px solid #999;padding:6px;width:55px;">Sat</th>
+        <th style="border:1px solid #999;padding:6px;width:62px;">Vol</th>
+        <th style="border:1px solid #999;padding:6px;width:95px;">Harga Satuan</th>
+        <th style="border:1px solid #999;padding:6px;width:105px;">Total Harga</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="5" style="border:1px solid #999;padding:6px;text-align:right;">Subtotal</td>
+            <td style="border:1px solid #999;padding:6px;text-align:right;">${fmtNum(r.subtotal)}</td></tr>
+        <tr><td colspan="5" style="border:1px solid #999;padding:6px;text-align:right;">PPN ${fmtNum(r.tax_percent)}%</td>
+            <td style="border:1px solid #999;padding:6px;text-align:right;">${fmtNum(r.tax_amount)}</td></tr>
+        <tr style="font-weight:bold;background:#eef2f7;">
+            <td colspan="5" style="border:1px solid #999;padding:7px;text-align:right;">TOTAL</td>
+            <td style="border:1px solid #999;padding:7px;text-align:right;">${fmtRp(r.grand_total)}</td></tr>
+      </tfoot>
+    </table>
 
-  $("pdfStage").innerHTML = `<div>${p2b}<div class="html2pdf__page-break"></div>${lampiran}</div>`;
-  html2pdf().set({ margin:0, filename:safeName(r.title)+".pdf",
-    image:{type:"jpeg",quality:0.95},
-    html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
-    jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
-    pagebreak:{mode:["css","legacy"]} })
-    .from($("pdfStage").firstElementChild).save();
+    ${r.notes ? `<div style="margin-top:14px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
+
+    <table style="width:100%;margin-top:45px;font-size:9pt;text-align:center;">
+      <tr><td>Dibuat oleh</td><td>Diperiksa</td><td>Disetujui</td></tr>
+      <tr><td style="height:70px;"></td><td></td><td></td></tr>
+      <tr><td>(..................)</td><td>(..................)</td><td>(..................)</td></tr>
+    </table>
+  </div>`);
+
+  await renderPdf([p2b, lampiran], safeName(r.title) + ".pdf");
 }
 
 /* ===================== DASHBOARD ===================== */
