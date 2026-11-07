@@ -70,6 +70,9 @@
     </form>
 
     <div id="authMsg" class="mt-4 text-sm hidden rounded-lg px-3 py-2"></div>
+    <div class="mt-4 text-center">
+      <button onclick="resetSession()" class="text-[11px] muted underline">Reset sesi (bersihkan data login di browser ini)</button>
+    </div>
   </div>
 </div>
 
@@ -432,8 +435,19 @@ $("tabRegister").onclick = () => {
 };
 $("loginForm").onsubmit = async e => {
   e.preventDefault();
-  const { error } = await sb.auth.signInWithPassword({ email:$("loginEmail").value.trim(), password:$("loginPassword").value });
-  if (error) authMsg(error.message);
+  const btn = e.target.querySelector("button");
+  btn.disabled = true; btn.textContent = "Memproses…"; $("authMsg").classList.add("hidden");
+  try {
+    const res = await Promise.race([
+      sb.auth.signInWithPassword({ email:$("loginEmail").value.trim(), password:$("loginPassword").value }),
+      new Promise((_,rej) => setTimeout(() => rej(new Error("TIMEOUT")), 15000))
+    ]);
+    if (res.error) authMsg(res.error.message);
+  } catch(err){
+    if (err.message === "TIMEOUT")
+      authMsg("Proses login menggantung. Biasanya karena sesi lama yang rusak. Klik \"Reset sesi\" di bawah lalu coba lagi.");
+    else authMsg(err.message || String(err));
+  } finally { btn.disabled = false; btn.textContent = "Masuk"; }
 };
 $("registerForm").onsubmit = async e => {
   e.preventDefault();
@@ -443,11 +457,48 @@ $("registerForm").onsubmit = async e => {
   if (error) return authMsg(error.message);
   if (!data.session) authMsg("Akun dibuat. Matikan 'Confirm email' di Supabase lalu login.","ok");
 };
-$("btnLogout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
-sb.auth.onAuthStateChange(async (_e, s) => {
-  if (s && s.user){ S.user = s.user; await bootApp(); }
-  else { $("app").classList.add("hidden"); $("authScreen").classList.remove("hidden"); }
-});
+$("btnLogout").onclick = () => hardLogout();
+
+async function hardLogout(){
+  try { await Promise.race([ sb.auth.signOut({ scope:"local" }),
+        new Promise(r => setTimeout(r, 3000)) ]); } catch(e){}
+  clearAuthStorage();
+  location.replace(location.pathname);          // buang #hash agar mulai bersih
+}
+function clearAuthStorage(){
+  try {
+    const keys = [];
+    for (let i=0;i<window.localStorage.length;i++){
+      const k = window.localStorage.key(i);
+      if (k && (k.indexOf("sb-") === 0 || k.indexOf("supabase") >= 0 || k.indexOf("rab-") === 0)) keys.push(k);
+    }
+    keys.forEach(k => window.localStorage.removeItem(k));
+  } catch(e){}
+  try { window.sessionStorage.clear(); } catch(e){}
+  Object.keys(memStore).forEach(k => delete memStore[k]);
+}
+function resetSession(){ clearAuthStorage(); location.replace(location.pathname); }
+
+/* PENTING: jangan memanggil fungsi Supabase lain DI DALAM callback
+   onAuthStateChange — callback itu berjalan di dalam kunci (lock) auth,
+   sehingga panggilan di dalamnya bisa menggantung selamanya. Karena itu
+   penanganannya ditunda keluar dari callback dengan setTimeout. */
+let bootBusy = false, bootedFor = null;
+sb.auth.onAuthStateChange((_e, s) => { setTimeout(() => handleSession(s), 0); });
+
+async function handleSession(s){
+  if (s && s.user){
+    if (bootBusy || bootedFor === s.user.id) return;
+    bootBusy = true; bootedFor = s.user.id; S.user = s.user;
+    try { await bootApp(); }
+    catch(err){ authMsg("Gagal memuat aplikasi: " + (err && err.message ? err.message : err)); bootedFor = null; }
+    finally { bootBusy = false; }
+  } else {
+    bootedFor = null; S.user = null; S.profile = null;
+    $("app").classList.add("hidden"); $("authScreen").classList.remove("hidden");
+    if (location.hash) history.replaceState(null, "", location.pathname);
+  }
+}
 
 /* ===================== BOOT ===================== */
 async function bootApp(){
@@ -1253,8 +1304,16 @@ $("userForm").onsubmit = async e => {
   } else if (storageMode === "cookie"){
     authMsg("localStorage diblokir browser; sesi disimpan lewat cookie sebagai cadangan.", "warn");
   }
-  const { data } = await sb.auth.getSession();
-  if (data.session && data.session.user){ S.user = data.session.user; await bootApp(); }
+  try {
+    const res = await Promise.race([
+      sb.auth.getSession(),
+      new Promise((_,rej) => setTimeout(() => rej(new Error("TIMEOUT")), 10000))
+    ]);
+    if (res.data && res.data.session) await handleSession(res.data.session);
+  } catch(err){
+    authMsg("Sesi lama tidak bisa dibaca" + (err.message === "TIMEOUT" ? " (timeout)" : "") +
+            ". Klik \"Reset sesi\" di bawah lalu login ulang.");
+  }
 })();
 </script>
 </body>
