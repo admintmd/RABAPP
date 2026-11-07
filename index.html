@@ -96,6 +96,7 @@
       <button data-tab="items"     class="navbtn">Master Barang/Jasa</button>
       <button data-tab="builder"   class="navbtn">Buat RAB</button>
       <button data-tab="history"   class="navbtn">Histori RAB</button>
+      <button data-tab="rules"     class="navbtn">Aturan Kategori</button>
       <button data-tab="logs"      class="navbtn">Log Perubahan</button>
       <button data-tab="users"     class="navbtn hidden" id="navUsers">Manajemen User</button>
     </nav>
@@ -220,6 +221,55 @@
       </div>
     </section>
 
+    <!-- ---------- ATURAN KATEGORI ---------- -->
+    <section id="view-rules" class="view hidden">
+      <div class="card p-4 mb-4">
+        <h3 class="font-semibold mb-2">Uji Deteksi</h3>
+        <div class="flex gap-2">
+          <input id="testName" placeholder="Ketik nama barang, cth: Switch PoE 8 Port Ruijie" class="inp">
+          <button onclick="runTest()" class="btn btn-pri whitespace-nowrap">Uji</button>
+        </div>
+        <div id="testResult" class="mt-3 text-sm"></div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card p-4">
+          <h3 class="font-semibold mb-3">Kategori &amp; Prefix Kode</h3>
+          <div class="scroll-x mb-3">
+            <table class="w-full text-sm"><thead class="thead"><tr>
+              <th class="px-2 py-2">Kategori</th><th class="px-2 py-2">Prefix</th>
+              <th class="px-2 py-2">Kode Terakhir</th><th class="px-2 py-2 text-right">Kata Kunci</th></tr></thead>
+              <tbody id="catBody"></tbody></table>
+          </div>
+          <div class="border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div class="text-sm font-medium mb-2">Tambah Kategori</div>
+            <div class="flex gap-2">
+              <input id="c_name" placeholder="Nama kategori" class="inp">
+              <input id="c_prefix" placeholder="PREFIX" class="inp !w-28 uppercase">
+              <button onclick="addCat()" class="btn btn-pri whitespace-nowrap">Tambah</button>
+            </div>
+            <p class="text-[11px] muted mt-2">Prefix jadi awalan kode otomatis, cth: CCTV-0001.</p>
+          </div>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="font-semibold mb-3">Kamus Kata Kunci</h3>
+          <select id="kw_cat" class="inp mb-3" onchange="renderKw()"></select>
+          <div id="kwList" class="flex flex-wrap gap-1 mb-3"></div>
+          <div class="flex gap-2">
+            <input id="kw_text" placeholder="kata kunci, cth: switch poe" class="inp">
+            <input id="kw_weight" type="number" min="1" max="5" value="3" class="inp !w-20" title="Bobot 1-5">
+            <button onclick="addKw()" class="btn btn-pri whitespace-nowrap">Tambah</button>
+          </div>
+          <div class="text-[11px] muted mt-3 space-y-1">
+            <p><b>Cara kerja.</b> Nama item dicocokkan sebagai potongan teks. Skor kategori = jumlah bobot kata kunci yang cocok; skor tertinggi menang.</p>
+            <p><b>Bobot.</b> Istilah spesifik diberi bobot besar agar menang atas istilah umum — "switch poe" (4) mengalahkan "switch" (1).</p>
+            <p><b>Cadangan.</b> Bila tidak ada kata kunci yang cocok, sistem mencari item lama yang namanya paling mirip dan memakai kategorinya.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------- LOGS ---------- -->
     <section id="view-logs" class="view hidden">
       <div class="flex flex-wrap gap-2 mb-3">
@@ -284,26 +334,45 @@
 const SUPABASE_URL = "https://hguizzsqjmaijztuzqak.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_OIb1YP0YV4_xJ6axLGVXJw_qNlZqiPq";
 
-
 /* --- Storage aman: sebagian browser (Edge Tracking Prevention, mode privat,
    file://) memblokir localStorage. Tanpa fallback ini, sesi login tidak
    pernah tersimpan dan aplikasi kembali ke layar login terus-menerus. --- */
 const memStore = {};
-let storageBlocked = false;
-const safeStorage = {
-  getItem(k){ try { return window.localStorage.getItem(k); }
-              catch(e){ storageBlocked = true; return k in memStore ? memStore[k] : null; } },
-  setItem(k,v){ try { window.localStorage.setItem(k,v); }
-                catch(e){ storageBlocked = true; memStore[k] = String(v); } },
-  removeItem(k){ try { window.localStorage.removeItem(k); }
-                 catch(e){ storageBlocked = true; delete memStore[k]; } }
+function probe(store){
+  try { const k="__rab_probe__"; store.setItem(k,"1");
+        const ok = store.getItem(k)==="1"; store.removeItem(k); return ok; }
+  catch(e){ return false; }
+}
+const cookieStore = {
+  getItem(k){
+    const m = document.cookie.match("(^|; )" + k.replace(/[-.]/g,"\\$&") + "=([^;]*)");
+    return m ? decodeURIComponent(m[2]) : null;
+  },
+  setItem(k,v){
+    const val = encodeURIComponent(String(v));
+    if (val.length > 3800){ memStore[k] = String(v); return; }   // cookie max ~4KB
+    document.cookie = k + "=" + val + ";path=/;max-age=" + (60*60*24*30) + ";SameSite=Lax";
+  },
+  removeItem(k){ delete memStore[k]; document.cookie = k + "=;path=/;max-age=0;SameSite=Lax"; }
 };
-try {
-  const probe = "__rab_probe__";
-  window.localStorage.setItem(probe, "1");
-  if (window.localStorage.getItem(probe) !== "1") storageBlocked = true;
-  window.localStorage.removeItem(probe);
-} catch(e){ storageBlocked = true; }
+let storageMode = "localStorage";
+let backend = null;
+try { if (probe(window.localStorage)) backend = window.localStorage; } catch(e){}
+if (!backend){ try { if (probe(window.sessionStorage)){ backend = window.sessionStorage; storageMode = "sessionStorage"; } } catch(e){} }
+if (!backend && probe(cookieStore)){ backend = cookieStore; storageMode = "cookie"; }
+if (!backend){
+  storageMode = "memory";
+  backend = { getItem:k => (k in memStore ? memStore[k] : null),
+              setItem:(k,v) => { memStore[k] = String(v); },
+              removeItem:k => { delete memStore[k]; } };
+}
+const storageBlocked = (storageMode === "memory");
+const safeStorage = {
+  getItem(k){ try { const v = backend.getItem(k); return v != null ? v : (k in memStore ? memStore[k] : null); }
+              catch(e){ return k in memStore ? memStore[k] : null; } },
+  setItem(k,v){ try { backend.setItem(k,v); } catch(e){ memStore[k] = String(v); } },
+  removeItem(k){ try { backend.removeItem(k); } catch(e){} delete memStore[k]; }
+};
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { storage: safeStorage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:false }
@@ -412,16 +481,21 @@ async function bootApp(){
   await loadCats();
   await Promise.all([loadItems(), loadRabs()]);
   if (prof.role === "admin") loadUsers();
-  switchTab("dashboard");
+  const last = (location.hash || "").replace("#","") || safeStorage.getItem("rab-tab") || "dashboard";
+  switchTab(last === "users" && prof.role !== "admin" ? "dashboard" : last);
 }
 document.querySelectorAll(".navbtn").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 function switchTab(tab){
+  if (!$("view-"+tab)) tab = "dashboard";
   document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
   $("view-"+tab).classList.remove("hidden");
   document.querySelectorAll(".navbtn").forEach(b => b.classList.toggle("tab-active", b.dataset.tab === tab));
+  safeStorage.setItem("rab-tab", tab);
+  if (location.hash !== "#"+tab) history.replaceState(null, "", "#"+tab);
   if (tab === "dashboard") renderDashboard();
   if (tab === "history") renderHistory();
   if (tab === "logs") loadLogs();
+  if (tab === "rules") loadKw();
 }
 
 /* ===================== KATEGORI ===================== */
@@ -431,48 +505,46 @@ async function loadCats(){
   $("itemCatFilter").innerHTML = '<option value="">Semua Kategori</option>' +
     S.cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
 }
-$("btnCats").onclick = () => {
-  openModal("Kategori & Prefix Kode", `
-    <table class="w-full text-sm mb-4"><thead class="thead"><tr>
-      <th class="px-2 py-2">Kategori</th><th class="px-2 py-2">Prefix</th><th class="px-2 py-2">Kode Terakhir</th></tr></thead>
-      <tbody>${S.cats.map(c => `<tr class="row">
-        <td class="px-2 py-2">${esc(c.name)}</td>
-        <td class="px-2 py-2 font-mono">${esc(c.code_prefix)}</td>
-        <td class="px-2 py-2 font-mono text-xs muted">${esc(c.code_prefix)}-${String(c.last_seq).padStart(4,"0")}</td>
-      </tr>`).join("")}</tbody></table>
-    <div class="border-t border-slate-200 dark:border-slate-700 pt-4">
-      <div class="text-sm font-medium mb-2">Tambah Kategori</div>
-      <div class="flex gap-2">
-        <input id="c_name" placeholder="Nama kategori" class="inp">
-        <input id="c_prefix" placeholder="PREFIX" class="inp !w-32 uppercase">
-        <button onclick="addCat()" class="btn btn-pri whitespace-nowrap">Tambah</button>
-      </div>
-      <p class="text-[11px] muted mt-2">Prefix dipakai sebagai awalan kode otomatis, cth: CCTV-0001.</p>
-    </div>
-    <div class="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
-      <div class="text-sm font-medium mb-2">Kamus Kata Kunci (dasar deteksi otomatis)</div>
-      <select id="kw_cat" class="inp mb-2" onchange="renderKw()">
-        ${S.cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
-      </select>
-      <div id="kwList" class="flex flex-wrap gap-1 mb-2"></div>
-      <div class="flex gap-2">
-        <input id="kw_text" placeholder="kata kunci, cth: switch poe" class="inp">
-        <input id="kw_weight" type="number" min="1" max="5" value="3" class="inp !w-20" title="Bobot 1-5">
-        <button onclick="addKw()" class="btn btn-pri whitespace-nowrap">Tambah</button>
-      </div>
-      <p class="text-[11px] muted mt-2">Bobot lebih tinggi menang saat satu nama cocok dengan beberapa kategori. Cth: "switch poe" (4) mengalahkan "switch" (1).</p>
-    </div>`);
-  loadKw();
-};
+$("btnCats").onclick = () => switchTab("rules");
+
 let KW = [];
 async function loadKw(){
   const { data } = await sb.from("category_keywords").select("*").order("keyword");
-  KW = data || []; renderKw();
+  KW = data || []; renderRules();
+}
+function renderRules(){
+  // tabel kategori
+  $("catBody").innerHTML = S.cats.map(c => {
+    const n = KW.filter(k => k.category_id === c.id).length;
+    return `<tr class="row">
+      <td class="px-2 py-2">${esc(c.name)}</td>
+      <td class="px-2 py-2 font-mono">${esc(c.code_prefix)}</td>
+      <td class="px-2 py-2 font-mono text-xs muted">${esc(c.code_prefix)}-${String(c.last_seq).padStart(4,"0")}</td>
+      <td class="px-2 py-2 text-right"><button onclick="focusKw('${c.id}')" class="chip bg-slate-100 dark:bg-slate-800">${n} kata</button></td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="4" class="p-4 text-center muted">Belum ada kategori.</td></tr>';
+
+  // dropdown kamus
+  const sel = $("kw_cat"), keep = sel.value;
+  sel.innerHTML = S.cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  if (keep && S.cats.find(c => c.id === keep)) sel.value = keep;
+  renderKw();
+}
+function focusKw(cid){ $("kw_cat").value = cid; renderKw(); $("kw_text").focus(); }
+async function runTest(){
+  const name = $("testName").value.trim();
+  if (name.length < 3) return toast("Ketik minimal 3 huruf.", "err");
+  const d = await detectCategory(name);
+  $("testResult").innerHTML = d
+    ? `<div class="rounded-lg px-3 py-2 bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-200">
+         Terdeteksi: <b>${esc(d.category_name)}</b> (${esc(d.code_prefix)}) &mdash; metode: ${esc(d.method)}, skor ${fmtNum(d.score)}</div>`
+    : `<div class="rounded-lg px-3 py-2 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+         Tidak terdeteksi. Item seperti ini akan masuk <b>Lain-lain</b>. Tambahkan kata kuncinya di panel kanan.</div>`;
 }
 function renderKw(){
   const cid = $("kw_cat") ? $("kw_cat").value : null;
   if (!cid) return;
-  const rows = KW.filter(k => k.category_id === cid);
+  const rows = KW.filter(k => k.category_id === cid).sort((a,b) => b.weight - a.weight);
   $("kwList").innerHTML = rows.map(k => `<span class="chip bg-slate-100 dark:bg-slate-800 flex items-center gap-1">
       ${esc(k.keyword)} <span class="muted">(${k.weight})</span>
       <button onclick="delKw('${k.id}')" class="text-rose-500 ml-1">&times;</button></span>`).join("")
@@ -496,7 +568,8 @@ async function addCat(){
   if (!name || !prefix) return toast("Nama dan prefix wajib diisi.", "err");
   const { error } = await sb.from("categories").insert({ name:name, code_prefix:prefix });
   if (error) return toast(error.message, "err");
-  await loadCats(); closeModal(); toast("Kategori ditambahkan.");
+  $("c_name").value = ""; $("c_prefix").value = "";
+  await loadCats(); renderRules(); toast("Kategori ditambahkan.");
 }
 
 /* ===================== MASTER ITEMS ===================== */
@@ -1172,9 +1245,13 @@ $("userForm").onsubmit = async e => {
 /* ===================== INIT ===================== */
 (async () => {
   if (storageBlocked){
-    authMsg("Penyimpanan browser diblokir (Tracking Prevention / mode privat / dibuka lewat file://). " +
-            "Login tetap bisa, tetapi sesi hilang saat halaman di-refresh. Jalankan lewat http://localhost " +
-            "atau matikan Tracking Prevention untuk situs ini.", "warn");
+    authMsg("Semua penyimpanan browser diblokir (Tracking Prevention / mode privat / dibuka lewat file://). " +
+            "Login tetap bisa, tetapi sesi akan hilang setiap refresh. Jalankan lewat http://localhost " +
+            "atau host halaman ini agar sesi bertahan.", "warn");
+  } else if (storageMode === "sessionStorage"){
+    authMsg("localStorage diblokir browser; sesi disimpan per-tab. Refresh aman, tetapi menutup tab akan logout.", "warn");
+  } else if (storageMode === "cookie"){
+    authMsg("localStorage diblokir browser; sesi disimpan lewat cookie sebagai cadangan.", "warn");
   }
   const { data } = await sb.auth.getSession();
   if (data.session && data.session.user){ S.user = data.session.user; await bootApp(); }
