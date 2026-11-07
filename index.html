@@ -65,7 +65,8 @@
       <div><label class="lbl">Email</label><input type="email" id="regEmail" required class="inp mt-1"></div>
       <div><label class="lbl">Divisi</label>
         <select id="regDivision" class="inp mt-1"><option value="">&mdash; pilih divisi &mdash;</option></select></div>
-      <div><label class="lbl">Password (min. 6 karakter)</label><input type="password" id="regPassword" required minlength="6" class="inp mt-1"></div>
+      <div><label class="lbl">Password</label><input type="password" id="regPassword" required minlength="8" class="inp mt-1">
+        <p class="text-[11px] muted mt-1">Minimal 8 karakter, memuat huruf besar, huruf kecil, dan angka.</p></div>
       <button class="btn btn-pri w-full py-2.5">Daftar</button>
       <p class="text-[11px] muted leading-relaxed">User pertama otomatis menjadi admin. Selanjutnya semua pendaftar menjadi <b>user</b>.</p>
     </form>
@@ -92,6 +93,7 @@
           <div id="meMeta" class="text-[11px] muted"></div>
         </div>
         <button onclick="toggleTheme()" class="btn btn-gh !px-2.5" title="Ganti tema"><span id="themeIcon">&#127769;</span></button>
+        <button id="btnPwd" class="btn btn-gh">Ubah Password</button>
         <button id="btnLogout" class="btn btn-gh">Keluar</button>
       </div>
     </div>
@@ -154,8 +156,13 @@
               <span id="rabEditBadge" class="hidden chip bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">Mode Edit</span>
             </div>
             <div class="grid sm:grid-cols-2 gap-3">
-              <div><label class="lbl">Judul RAB *</label><input id="rabTitle" class="inp mt-1"></div>
-              <div><label class="lbl">Nama Proyek</label><input id="rabProject" class="inp mt-1"></div>
+              <div class="sm:col-span-2"><label class="lbl">Tujuan Pembelian *</label>
+                <input id="rabTitle" class="inp mt-1" placeholder="cth: Pekerjaan jalan akses Siloam - Millenium Village"></div>
+              <div class="sm:col-span-2"><label class="lbl">Nama Pekerjaan / Pengadaan *</label>
+                <input id="rabProject" class="inp mt-1" placeholder="Tampil di kolom NAMA BARANG pada P2B">
+                <p class="text-[11px] muted mt-1">Qty pada P2B selalu 1 Lot, keterangan &quot;RAB terlampir&quot;.</p></div>
+              <div class="sm:col-span-2"><label class="lbl">Lokasi Penempatan</label>
+                <input id="rabLocation" class="inp mt-1" placeholder="cth: LV Sentral"></div>
               <div><label class="lbl">Divisi (otomatis)</label>
                 <input id="rabDivision" disabled class="inp mt-1 opacity-70"></div>
               <div><label class="lbl">Dibuat oleh (otomatis)</label>
@@ -223,7 +230,7 @@
       <div class="card scroll-x">
         <table class="w-full text-sm">
           <thead class="thead"><tr>
-            <th class="px-3 py-2">Judul</th><th class="px-3 py-2">Proyek</th><th class="px-3 py-2">Pembuat</th>
+            <th class="px-3 py-2">Tujuan Pembelian</th><th class="px-3 py-2">Pekerjaan</th><th class="px-3 py-2">Pembuat</th>
             <th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Status</th>
             <th class="px-3 py-2 text-right">Total</th><th class="px-3 py-2"></th></tr></thead>
           <tbody id="histBody"></tbody>
@@ -329,7 +336,8 @@
           <form id="userForm" class="space-y-3">
             <div><label class="lbl">Nama Lengkap</label><input id="newName" class="inp mt-1"></div>
             <div><label class="lbl">Email *</label><input id="newEmail" type="email" required class="inp mt-1"></div>
-            <div><label class="lbl">Password *</label><input id="newPass" type="text" required minlength="6" class="inp mt-1"></div>
+            <div><label class="lbl">Password *</label><input id="newPass" type="text" required minlength="8" class="inp mt-1">
+              <p class="text-[11px] muted mt-1">Min. 8 karakter, ada huruf besar, huruf kecil, dan angka.</p></div>
             <div><label class="lbl">Divisi</label>
               <select id="newDiv" class="inp mt-1"><option value="">&mdash; pilih divisi &mdash;</option></select></div>
             <div><label class="lbl">Role</label><select id="newRole" class="inp mt-1">
@@ -486,6 +494,8 @@ $("loginForm").onsubmit = async e => {
 };
 $("registerForm").onsubmit = async e => {
   e.preventDefault();
+  const perr = pwdErrors($("regPassword").value);
+  if (perr.length) return authMsg("Password belum memenuhi: " + perr.join(", ") + ".");
   const { data, error } = await sb.auth.signUp({
     email:$("regEmail").value.trim(), password:$("regPassword").value,
     options:{ data:{ full_name:$("regName").value.trim(), division:$("regDivision").value.trim() } }});
@@ -493,6 +503,73 @@ $("registerForm").onsubmit = async e => {
   if (!data.session) authMsg("Akun dibuat. Matikan 'Confirm email' di Supabase lalu login.","ok");
 };
 $("btnLogout").onclick = () => hardLogout();
+
+/* ===================== UBAH PASSWORD ===================== */
+const PWD_RULES = [
+  { id:"len", label:"Minimal 8 karakter",     test:v => v.length >= 8 },
+  { id:"up",  label:"Minimal 1 huruf besar",  test:v => /[A-Z]/.test(v) },
+  { id:"low", label:"Minimal 1 huruf kecil",  test:v => /[a-z]/.test(v) },
+  { id:"num", label:"Minimal 1 angka",        test:v => /[0-9]/.test(v) }
+];
+function pwdErrors(v){ return PWD_RULES.filter(r => !r.test(v || "")).map(r => r.label); }
+
+$("btnPwd").onclick = () => {
+  openModal("Ubah Password", `
+    <div class="space-y-3">
+      <div><label class="lbl">Password Lama *</label><input id="pw_old" type="password" class="inp mt-1" autocomplete="current-password"></div>
+      <div><label class="lbl">Password Baru *</label><input id="pw_new" type="password" class="inp mt-1" autocomplete="new-password"></div>
+      <div><label class="lbl">Konfirmasi Password Baru *</label><input id="pw_cfm" type="password" class="inp mt-1" autocomplete="new-password"></div>
+      <div id="pw_rules" class="text-[11px] space-y-1 pt-1"></div>
+      <div id="pw_msg" class="text-sm hidden rounded-lg px-3 py-2"></div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeModal()" class="btn btn-gh">Batal</button>
+        <button id="pw_save" onclick="changePassword()" class="btn btn-pri">Simpan</button>
+      </div>
+    </div>`);
+  $("pw_new").oninput = renderPwdRules;
+  $("pw_cfm").oninput = renderPwdRules;
+  renderPwdRules();
+};
+function renderPwdRules(){
+  const v = $("pw_new").value, c = $("pw_cfm").value;
+  const items = PWD_RULES.map(r => ({ ok:r.test(v), label:r.label }));
+  items.push({ ok: c.length > 0 && c === v, label:"Konfirmasi cocok" });
+  $("pw_rules").innerHTML = items.map(i =>
+    `<div class="${i.ok ? "text-emerald-600 dark:text-emerald-400" : "muted"}">${i.ok ? "&#10003;" : "&#9675;"} ${i.label}</div>`).join("");
+}
+function pwdMsg(m, type){
+  const e = $("pw_msg"); e.textContent = m;
+  e.className = "text-sm rounded-lg px-3 py-2 " + (type === "ok"
+    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+    : "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300");
+  e.classList.remove("hidden");
+}
+async function changePassword(){
+  const oldPw = $("pw_old").value, newPw = $("pw_new").value, cfm = $("pw_cfm").value;
+  if (!oldPw) return pwdMsg("Password lama wajib diisi.");
+  const errs = pwdErrors(newPw);
+  if (errs.length) return pwdMsg("Password baru belum memenuhi: " + errs.join(", ") + ".");
+  if (newPw !== cfm) return pwdMsg("Konfirmasi password tidak cocok.");
+  if (newPw === oldPw) return pwdMsg("Password baru harus berbeda dari password lama.");
+
+  const btn = $("pw_save"); btn.disabled = true; btn.textContent = "Menyimpan…";
+  try {
+    // 1) Verifikasi password lama lewat client terpisah agar sesi aktif tidak terganggu
+    const chk = await sbProv.auth.signInWithPassword({ email:S.profile.email, password:oldPw });
+    if (chk.error){ pwdMsg("Password lama salah."); return; }
+    await sbProv.auth.signOut();
+
+    // 2) Ganti password pada sesi aktif
+    const res = await sb.auth.updateUser({ password:newPw });
+    if (res.error){ pwdMsg(res.error.message); return; }
+
+    pwdMsg("Password berhasil diubah.", "ok");
+    setTimeout(closeModal, 1200);
+    toast("Password berhasil diubah.");
+  } catch(err){
+    pwdMsg(err && err.message ? err.message : String(err));
+  } finally { btn.disabled = false; btn.textContent = "Simpan"; }
+}
 
 async function hardLogout(){
   try { await Promise.race([ sb.auth.signOut({ scope:"local" }),
@@ -1151,17 +1228,19 @@ $("inpTax").oninput = recalc;
 $("btnResetRab").onclick = () => resetBuilder();
 function resetBuilder(){
   S.draft = { id:null, lines:[] };
-  ["rabTitle","rabProject","rabNotes"].forEach(i => $(i).value = "");
+  ["rabTitle","rabProject","rabNotes","rabLocation"].forEach(i => $(i).value = "");
   setRabMeta(S.profile.division, S.profile.full_name ? (S.profile.full_name + " (" + S.profile.email + ")") : S.profile.email);
   $("rabStatus").value = "Draft"; $("inpTax").value = 11;
   $("rabEditBadge").classList.add("hidden"); renderDraft();
 }
 $("btnSaveRab").onclick = async () => {
   const title = $("rabTitle").value.trim();
-  if (!title) return toast("Judul RAB wajib diisi.", "err");
+  if (!title) return toast("Tujuan Pembelian wajib diisi.", "err");
+  if (!$("rabProject").value.trim()) return toast("Nama Pekerjaan/Pengadaan wajib diisi.", "err");
   if (!S.draft.lines.length) return toast("Minimal 1 item.", "err");
   const t = totals();
   const header = { title:title, project_name:$("rabProject").value.trim()||null,
+    location:$("rabLocation").value.trim()||null,
     division: rabDivisionValue(), status:$("rabStatus").value,
     notes:$("rabNotes").value.trim()||null, tax_percent:t.taxPct, margin_percent:0,
     subtotal:t.subtotal, margin_amount:0, tax_amount:t.tax, grand_total:t.grand };
@@ -1255,7 +1334,8 @@ async function viewRab(id){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
   openModal(r.title, `
     <div class="text-sm space-y-1 mb-4">
-      <div><b>Proyek:</b> ${esc(r.project_name||"-")}</div>
+      <div><b>Pekerjaan:</b> ${esc(r.project_name||"-")}</div>
+      <div><b>Lokasi Penempatan:</b> ${esc(r.location||"-")}</div>
       <div><b>Pembuat:</b> ${esc(r.profiles ? r.profiles.email : "-")} \u00B7 ${esc(r.division||"-")}</div>
       <div><b>Tanggal:</b> ${fmtDate(r.created_at)} \u00B7 <b>Status:</b> ${esc(r.status)}</div>
       ${r.notes?`<div><b>Catatan:</b> ${esc(r.notes)}</div>`:""}</div>
@@ -1282,6 +1362,7 @@ async function editRab(id){
     unit_price:Number(l.unit_price), vendor_price_id:l.vendor_price_id,
     price_source:l.price_source, price_ref:l.price_ref })) };
   $("rabTitle").value = r.title; $("rabProject").value = r.project_name||"";
+  $("rabLocation").value = r.location||"";
   setRabMeta(r.division, r.profiles ? r.profiles.email : "-"); $("rabStatus").value = r.status;
   $("rabNotes").value = r.notes||""; $("inpTax").value = r.tax_percent;
   $("rabEditBadge").classList.remove("hidden"); renderDraft(); switchTab("builder");
@@ -1297,6 +1378,7 @@ async function delRab(id){
 function draftAsRab(){
   const t = totals();
   return { r:{ title:$("rabTitle").value||"RAB Tanpa Judul", project_name:$("rabProject").value,
+      location:$("rabLocation").value,
       division: rabDivisionValue(), status:$("rabStatus").value, notes:$("rabNotes").value,
       created_at:new Date().toISOString(), profiles:{ email:S.profile.email },
       subtotal:t.subtotal, tax_percent:t.taxPct, tax_amount:t.tax, grand_total:t.grand },
@@ -1312,8 +1394,9 @@ async function exportRab(id, kind){
 function safeName(s){ return String(s||"RAB").replace(/[^\w\s-]/g,"").trim().replace(/\s+/g,"_").slice(0,60); }
 function toXlsx(r, lines){
   const aoa = [["RENCANA ANGGARAN BIAYA"],[],
-    ["Judul RAB", r.title], ["Nama Proyek", r.project_name||"-"],
-    ["Pembuat", r.profiles ? r.profiles.email : "-"], ["Divisi", r.division||"-"],
+    ["Tujuan Pembelian", r.title], ["Nama Pekerjaan/Pengadaan", r.project_name||"-"],
+    ["Lokasi Penempatan", r.location||"-"],
+    ["Pembuat", r.profiles ? r.profiles.email : "-"], ["Dept / Divisi", r.division||"-"],
     ["Tanggal", fmtDate(r.created_at)], ["Status", r.status||"-"], ["Catatan", r.notes||"-"], [],
     ["No","Kode","Uraian","Satuan","Qty","Harga Satuan","Subtotal","Acuan Harga"]];
   lines.forEach((l,i) => aoa.push([i+1, l.item_code||"", l.item_name, l.unit||"", Number(l.qty),
@@ -1328,6 +1411,64 @@ function toXlsx(r, lines){
   XLSX.writeFile(wb, safeName(r.title)+".xlsx");
 }
 function toPdf(r, lines){
+  const BD = "1px solid #000";
+  const tgl = new Date(r.created_at || Date.now())
+    .toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
+
+  /* ---------- HALAMAN 1 : FORMULIR P2B ---------- */
+  const p2b = `
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#000;padding:26px;background:#fff;">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+      <tr>
+        <td style="vertical-align:top;">
+          <div style="font-size:20pt;font-weight:bold;letter-spacing:-0.5px;">
+            <span style="color:#1b2a4a;">LippoLand</span> <span style="color:#e23b2e;">TMD</span>
+          </div>
+          <table style="margin-top:10px;font-size:11pt;">
+            <tr><td style="font-weight:bold;width:52px;">TGL</td><td>:</td>
+                <td style="border-bottom:1px dotted #000;padding:0 10px;">${esc(tgl)}</td></tr>
+            <tr><td style="font-weight:bold;padding-top:6px;">DEPT</td><td style="padding-top:6px;">:</td>
+                <td style="border-bottom:1px dotted #000;padding:6px 10px 0 10px;">${esc(r.division || "-")}</td></tr>
+          </table>
+        </td>
+        <td style="vertical-align:top;width:48%;">
+          <table style="width:100%;border:${BD};"><tr>
+            <td style="padding:10px 8px;text-align:center;font-size:24pt;font-weight:bold;width:34%;">P2B</td>
+            <td style="padding:10px 8px;font-size:9pt;font-weight:bold;">PERMINTAAN PEMBELIAN BARANG</td>
+          </tr></table>
+        </td>
+      </tr>
+    </table>
+
+    <table style="width:100%;border-collapse:collapse;border:${BD};">
+      <tr><td colspan="4" style="border:${BD};padding:4px 6px;">
+        <div style="font-size:8pt;font-weight:bold;">TUJUAN PEMBELIAN:</div>
+        <div style="font-size:13pt;padding:2px 0 4px 2px;">${esc(r.title || "-")}</div></td></tr>
+      <tr><td colspan="4" style="border:${BD};padding:4px 6px;">
+        <div style="font-size:8pt;font-weight:bold;">LOKASI PENEMPATAN:</div>
+        <div style="font-size:13pt;padding:2px 0 4px 2px;">${esc(r.location || "-")}</div></td></tr>
+      <tr style="font-size:9pt;font-weight:bold;text-align:center;">
+        <td style="border:${BD};padding:5px;width:36px;">No.</td>
+        <td style="border:${BD};padding:5px;">NAMA BARANG</td>
+        <td style="border:${BD};padding:5px;width:62px;">QTY</td>
+        <td style="border:${BD};padding:5px;width:150px;">KETERANGAN</td></tr>
+      <tr style="font-size:12pt;">
+        <td style="border:${BD};padding:8px 5px;text-align:center;vertical-align:top;">1</td>
+        <td style="border:${BD};padding:8px;vertical-align:top;height:250px;">${esc(r.project_name || r.title || "-")}</td>
+        <td style="border:${BD};padding:8px 5px;text-align:center;vertical-align:top;">1 Lot</td>
+        <td style="border:${BD};padding:8px;vertical-align:top;">RAB terlampir</td></tr>
+      <tr style="font-size:8pt;font-weight:bold;text-align:center;">
+        <td colspan="2" style="border:${BD};padding:5px;text-align:left;">DIMINTA :</td>
+        <td colspan="1" style="border:${BD};padding:5px;text-align:left;">DIPERIKSA :</td>
+        <td style="border:${BD};padding:5px;">DISETUJUI :</td></tr>
+      <tr>
+        <td colspan="2" style="border:${BD};height:95px;"></td>
+        <td style="border:${BD};height:95px;"></td>
+        <td style="border:${BD};height:95px;"></td></tr>
+    </table>
+  </div>`;
+
+  /* ---------- HALAMAN 2 : LAMPIRAN RAB ---------- */
   const rows = lines.map((l,i) => `<tr>
     <td style="border:1px solid #cbd5e1;padding:4px;text-align:center">${i+1}</td>
     <td style="border:1px solid #cbd5e1;padding:4px">${esc(l.item_name)}<div style="font-size:8pt;color:#777">${esc(l.price_ref||"")}</div></td>
@@ -1335,37 +1476,41 @@ function toPdf(r, lines){
     <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.qty)}</td>
     <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.unit_price)}</td>
     <td style="border:1px solid #cbd5e1;padding:4px;text-align:right">${fmtNum(l.qty*l.unit_price)}</td></tr>`).join("");
-  $("pdfStage").innerHTML = `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;padding:28px;background:#fff;">
-    <h2 style="margin:0 0 2px 0;">RENCANA ANGGARAN BIAYA</h2>
-    <div style="font-size:9pt;color:#555;margin-bottom:14px;">${esc(r.title)}</div>
-    <table style="width:100%;font-size:9pt;margin-bottom:12px;">
-      <tr><td style="width:90px;">Proyek</td><td>: ${esc(r.project_name||"-")}</td><td style="width:80px;">Tanggal</td><td>: ${fmtDate(r.created_at)}</td></tr>
-      <tr><td>Pembuat</td><td>: ${esc(r.profiles ? r.profiles.email : "-")}</td><td>Status</td><td>: ${esc(r.status||"-")}</td></tr>
-      <tr><td>Divisi</td><td colspan="3">: ${esc(r.division||"-")}</td></tr></table>
+
+  const lampiran = `
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;padding:26px;background:#fff;">
+    <div style="text-align:center;font-weight:bold;font-size:12pt;margin-bottom:12px;">
+      LAMPIRAN &mdash; RENCANA ANGGARAN BIAYA</div>
+    <table style="width:100%;font-size:9pt;margin-bottom:10px;">
+      <tr><td style="width:120px;">Tujuan Pembelian</td><td>: ${esc(r.title||"-")}</td></tr>
+      <tr><td>Pekerjaan</td><td>: ${esc(r.project_name||"-")}</td></tr>
+      <tr><td>Lokasi Penempatan</td><td>: ${esc(r.location||"-")}</td></tr>
+      <tr><td>Dept / Divisi</td><td>: ${esc(r.division||"-")}</td></tr>
+      <tr><td>Tanggal</td><td>: ${esc(tgl)}</td></tr>
+    </table>
     <table style="width:100%;border-collapse:collapse;font-size:9pt;">
-      <thead><tr style="background:#f1f5f9;">
+      <thead><tr style="background:#1b2a4a;color:#fff;">
         <th style="border:1px solid #cbd5e1;padding:5px;width:28px;">No</th>
         <th style="border:1px solid #cbd5e1;padding:5px;text-align:left;">Uraian</th>
         <th style="border:1px solid #cbd5e1;padding:5px;width:55px;">Sat</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:60px;">Qty</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:90px;">Harga</th>
-        <th style="border:1px solid #cbd5e1;padding:5px;width:100px;">Subtotal</th></tr></thead>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:60px;">Vol</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:90px;">Harga Satuan</th>
+        <th style="border:1px solid #cbd5e1;padding:5px;width:100px;">Total Harga</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <table style="width:100%;font-size:9pt;margin-top:10px;">
-      <tr><td style="text-align:right;">Subtotal</td><td style="text-align:right;width:120px;">${fmtRp(r.subtotal)}</td></tr>
+      <tr><td style="text-align:right;">Subtotal</td><td style="text-align:right;width:130px;">${fmtRp(r.subtotal)}</td></tr>
       <tr><td style="text-align:right;">PPN ${fmtNum(r.tax_percent)}%</td><td style="text-align:right;">${fmtRp(r.tax_amount)}</td></tr>
       <tr><td style="text-align:right;font-weight:bold;border-top:1px solid #333;">TOTAL</td>
           <td style="text-align:right;font-weight:bold;border-top:1px solid #333;">${fmtRp(r.grand_total)}</td></tr></table>
-    ${r.notes?`<div style="margin-top:12px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>`:""}
-    <table style="width:100%;margin-top:40px;font-size:9pt;text-align:center;">
-      <tr><td>Dibuat oleh</td><td>Diperiksa</td><td>Disetujui</td></tr>
-      <tr><td style="height:60px;"></td><td></td><td></td></tr>
-      <tr><td>(${esc(r.profiles ? r.profiles.email : "")})</td><td>(..................)</td><td>(..................)</td></tr></table>
+    ${r.notes ? `<div style="margin-top:12px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
   </div>`;
-  html2pdf().set({ margin:0, filename:safeName(r.title)+".pdf", image:{type:"jpeg",quality:0.95},
+
+  $("pdfStage").innerHTML = `<div>${p2b}<div class="html2pdf__page-break"></div>${lampiran}</div>`;
+  html2pdf().set({ margin:0, filename:safeName(r.title)+".pdf",
+    image:{type:"jpeg",quality:0.95},
     html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
-    jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}, pagebreak:{mode:["css","legacy"]} })
+    jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+    pagebreak:{mode:["css","legacy"]} })
     .from($("pdfStage").firstElementChild).save();
 }
 
@@ -1420,6 +1565,8 @@ async function updUser(id, field, val){
 $("userForm").onsubmit = async e => {
   e.preventDefault();
   const email = $("newEmail").value.trim();
+  const perr = pwdErrors($("newPass").value);
+  if (perr.length) return toast("Password belum memenuhi: " + perr.join(", ") + ".", "err");
   const { data, error } = await sbProv.auth.signUp({ email:email, password:$("newPass").value,
     options:{ data:{ full_name:$("newName").value.trim(), division:$("newDiv").value.trim() } }});
   if (error) return toast(error.message, "err");
