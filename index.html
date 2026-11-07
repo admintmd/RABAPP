@@ -1340,7 +1340,10 @@ function workPrefix(nama){
 }
 function lineLabel(l){
   if (l.item_type === "Jasa") return l.item_name;
-  return workPrefix(l.item_name) + l.item_name.charAt(0).toLowerCase() + l.item_name.slice(1);
+  const n = l.item_name;
+  // "PJU Cobra ..." tetap PJU, bukan pJU
+  const badan = /^[A-Z]{2,}/.test(n) ? n : n.charAt(0).toLowerCase() + n.slice(1);
+  return workPrefix(n) + badan;
 }
 function renderDraft(){
   $("draftEmpty").classList.toggle("hidden", S.draft.lines.length > 0);
@@ -1924,21 +1927,24 @@ async function toPdf(r, lines){
         <td style="border:${BD};padding:9px;vertical-align:top;height:300px;">${esc(r.project_name || r.title || "-")}</td>
         <td style="border:${BD};padding:9px 5px;text-align:center;vertical-align:top;">1 Lot</td>
         <td style="border:${BD};padding:9px;vertical-align:top;">RAB terlampir</td></tr>
+    </table>
+
+    <table style="width:100%;border-collapse:collapse;border:${BD};border-top:0;table-layout:fixed;">
       <tr style="font-size:8pt;font-weight:bold;">
-        <td colspan="2" style="border:${BD};padding:6px;">DIMINTA :</td>
-        <td style="border:${BD};padding:6px;">DIPERIKSA :</td>
-        <td style="border:${BD};padding:6px;">DISETUJUI :</td></tr>
+        <td style="border:${BD};padding:6px;width:33.33%;">DIMINTA :</td>
+        <td style="border:${BD};padding:6px;width:33.33%;">DIPERIKSA :</td>
+        <td style="border:${BD};padding:6px;width:33.34%;">DISETUJUI :</td></tr>
       <tr>
-        <td colspan="2" style="border:${BD};height:100px;"></td>
-        <td style="border:${BD};height:100px;"></td>
-        <td style="border:${BD};height:100px;"></td></tr>
+        <td style="border:${BD};height:105px;"></td>
+        <td style="border:${BD};height:105px;"></td>
+        <td style="border:${BD};height:105px;"></td></tr>
     </table>
   </div>`);
 
   /* ================= HALAMAN 2 : PERHITUNGAN RAB ================= */
   const rows = lines.map((l,i) => `<tr>
     <td style="border:1px solid #999;padding:5px;text-align:center">${i+1}</td>
-    <td style="border:1px solid #999;padding:5px">${esc(l.item_name)}${l.price_ref ? `<div style="font-size:7.5pt;color:#777">${esc(l.price_ref)}</div>` : ""}</td>
+    <td style="border:1px solid #999;padding:5px">${esc(l.item_name)}</td>
     <td style="border:1px solid #999;padding:5px;text-align:center">${esc(l.unit||"")}</td>
     <td style="border:1px solid #999;padding:5px;text-align:right">${fmtNum(l.qty)}</td>
     <td style="border:1px solid #999;padding:5px;text-align:right">${fmtNum(l.unit_price)}</td>
@@ -1978,12 +1984,6 @@ async function toPdf(r, lines){
     </table>
 
     ${r.notes ? `<div style="margin-top:14px;font-size:9pt;"><b>Catatan:</b> ${esc(r.notes)}</div>` : ""}
-
-    <table style="width:100%;margin-top:45px;font-size:9pt;text-align:center;">
-      <tr><td>Dibuat oleh</td><td>Diperiksa</td><td>Disetujui</td></tr>
-      <tr><td style="height:70px;"></td><td></td><td></td></tr>
-      <tr><td>(..................)</td><td>(..................)</td><td>(..................)</td></tr>
-    </table>
   </div>`);
 
   await renderPdf([p2b, lampiran], safeName(r.title) + ".pdf");
