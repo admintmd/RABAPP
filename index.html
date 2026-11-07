@@ -134,9 +134,17 @@
         <button id="btnImport" class="btn btn-gh">Import CSV</button>
         <button id="btnCats" class="btn btn-gh">Kategori</button>
       </div>
+      <div id="bulkBar" class="hidden mb-3 rounded-lg px-4 py-3 bg-slate-900 text-white dark:bg-slate-800 flex items-center justify-between gap-3">
+        <div class="text-sm"><b id="bulkCount">0</b> item dipilih</div>
+        <div class="flex gap-2">
+          <button onclick="clearSel()" class="btn !py-1.5 border border-slate-500 text-white hover:bg-slate-700">Batal Pilih</button>
+          <button onclick="bulkDelete()" class="btn !py-1.5 bg-rose-600 text-white hover:bg-rose-500">Hapus Terpilih</button>
+        </div>
+      </div>
       <div class="card scroll-x">
         <table class="w-full text-sm sticky-head">
           <thead class="thead"><tr>
+            <th class="px-3 py-2 w-10"><input type="checkbox" id="selAll" onclick="toggleAll(this.checked)" title="Pilih semua yang tampil"></th>
             <th class="px-3 py-2 w-14">Foto</th><th class="px-3 py-2">Kode</th><th class="px-3 py-2">Nama</th>
             <th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Satuan</th>
             <th class="px-3 py-2 text-right">Harga Acuan</th><th class="px-3 py-2">Sumber</th>
@@ -829,14 +837,48 @@ function priceRef(item){
                         : (item.estimate_price != null ? "Harga estimasi master" : null);
   return { lowest:lowest, last:last, count:vps.length, ref:ref, refLabel:refLabel };
 }
-function renderItems(){
+let SEL = {};
+function visibleItems(){
   const q = ($("itemSearch").value||"").toLowerCase(), cf = $("itemCatFilter").value;
-  const rows = S.items.filter(i =>
+  return S.items.filter(i =>
     (!q || [i.code,i.name,i.category,i.description].join(" ").toLowerCase().includes(q)) &&
     (!cf || i.category_id === cf));
+}
+function toggleSel(id, on){ if (on) SEL[id] = true; else delete SEL[id]; refreshBulk(); }
+function toggleAll(on){
+  visibleItems().forEach(i => { if (on) SEL[i.id] = true; else delete SEL[i.id]; });
+  renderItems();
+}
+function clearSel(){ SEL = {}; renderItems(); }
+function refreshBulk(){
+  const n = Object.keys(SEL).length;
+  $("bulkCount").textContent = n;
+  $("bulkBar").classList.toggle("hidden", n === 0);
+  const vis = visibleItems();
+  const all = vis.length > 0 && vis.every(i => SEL[i.id]);
+  if ($("selAll")) $("selAll").checked = all;
+}
+async function bulkDelete(){
+  const ids = Object.keys(SEL);
+  if (!ids.length) return;
+  if (S.profile.role !== "admin") return toast("Hanya admin yang dapat menghapus item.", "err");
+  const nama = ids.map(id => (S.items.find(x => x.id === id) || {}).name).filter(Boolean);
+  const contoh = nama.slice(0,5).join("\n- ");
+  if (!confirm("Hapus " + ids.length + " item beserta SELURUH riwayat harga vendornya?\n\n- " +
+      contoh + (nama.length > 5 ? "\n- …dan " + (nama.length-5) + " lainnya" : "") +
+      "\n\nTindakan ini tidak bisa dibatalkan.")) return;
+  const { error } = await sb.from("items").delete().in("id", ids);
+  if (error) return toast(error.message, "err");
+  SEL = {};
+  await loadItems();
+  toast(ids.length + " item dihapus.");
+}
+function renderItems(){
+  const rows = visibleItems();
   $("itemsBody").innerHTML = rows.map(i => {
     const p = priceRef(i);
-    return `<tr class="row align-top">
+    return `<tr class="row align-top ${SEL[i.id] ? "bg-slate-100 dark:bg-slate-800" : ""}">
+      <td class="px-3 py-2"><input type="checkbox" ${SEL[i.id]?"checked":""} onclick="toggleSel('${i.id}', this.checked)"></td>
       <td class="px-3 py-2">${i.image_url
         ? `<img src="${esc(i.image_url)}" class="w-10 h-10 object-cover rounded cursor-pointer" onclick="openImg('${esc(i.image_url)}')">`
         : `<div class="w-10 h-10 rounded bg-slate-100 dark:bg-slate-800 grid place-items-center text-[10px] muted">&mdash;</div>`}</td>
@@ -853,7 +895,8 @@ function renderItems(){
         <button onclick="openItemLog('${i.id}')" class="underline ml-2">Log</button>
         ${S.profile.role==="admin" ? `<button onclick="deleteItem('${i.id}')" class="underline ml-2 text-rose-600">Hapus</button>` : ""}
       </td></tr>`;
-  }).join("") || '<tr><td colspan="8" class="p-8 text-center muted">Tidak ada data.</td></tr>';
+  }).join("") || '<tr><td colspan="9" class="p-8 text-center muted">Tidak ada data.</td></tr>';
+  refreshBulk();
 }
 $("itemSearch").oninput = renderItems;
 $("itemCatFilter").onchange = renderItems;
