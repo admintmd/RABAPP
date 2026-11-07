@@ -63,7 +63,8 @@
     <form id="registerForm" class="space-y-3 hidden">
       <div><label class="lbl">Nama Lengkap</label><input id="regName" required class="inp mt-1"></div>
       <div><label class="lbl">Email</label><input type="email" id="regEmail" required class="inp mt-1"></div>
-      <div><label class="lbl">Divisi</label><input id="regDivision" class="inp mt-1" placeholder="cth: Data &amp; Technology Solution"></div>
+      <div><label class="lbl">Divisi</label>
+        <select id="regDivision" class="inp mt-1"><option value="">&mdash; pilih divisi &mdash;</option></select></div>
       <div><label class="lbl">Password (min. 6 karakter)</label><input type="password" id="regPassword" required minlength="6" class="inp mt-1"></div>
       <button class="btn btn-pri w-full py-2.5">Daftar</button>
       <p class="text-[11px] muted leading-relaxed">User pertama otomatis menjadi admin. Selanjutnya semua pendaftar menjadi <b>user</b>.</p>
@@ -101,6 +102,7 @@
       <button data-tab="history"   class="navbtn">Histori RAB</button>
       <button data-tab="rules"     class="navbtn">Aturan Kategori</button>
       <button data-tab="logs"      class="navbtn">Log Perubahan</button>
+      <button data-tab="divisions" class="navbtn hidden" id="navDivs">Divisi</button>
       <button data-tab="users"     class="navbtn hidden" id="navUsers">Manajemen User</button>
     </nav>
   </header>
@@ -154,7 +156,10 @@
             <div class="grid sm:grid-cols-2 gap-3">
               <div><label class="lbl">Judul RAB *</label><input id="rabTitle" class="inp mt-1"></div>
               <div><label class="lbl">Nama Proyek</label><input id="rabProject" class="inp mt-1"></div>
-              <div><label class="lbl">Divisi</label><input id="rabDivision" class="inp mt-1"></div>
+              <div><label class="lbl">Divisi (otomatis)</label>
+                <input id="rabDivision" disabled class="inp mt-1 opacity-70"></div>
+              <div><label class="lbl">Dibuat oleh (otomatis)</label>
+                <input id="rabCreator" disabled class="inp mt-1 opacity-70"></div>
               <div><label class="lbl">Status</label><select id="rabStatus" class="inp mt-1">
                 <option>Draft</option><option>Approved</option><option>Exported</option></select></div>
               <div class="sm:col-span-2"><label class="lbl">Catatan</label><textarea id="rabNotes" rows="2" class="inp mt-1"></textarea></div>
@@ -212,7 +217,9 @@
         <input id="histSearch" placeholder="Cari judul / proyek…" class="inp flex-1 min-w-[200px]">
         <select id="histStatus" class="inp !w-auto"><option value="">Semua Status</option>
           <option>Draft</option><option>Approved</option><option>Exported</option></select>
+        <select id="histDiv" class="inp !w-auto hidden"><option value="">Semua Divisi</option></select>
       </div>
+      <p id="histScope" class="text-[11px] muted mb-2"></p>
       <div class="card scroll-x">
         <table class="w-full text-sm">
           <thead class="thead"><tr>
@@ -290,6 +297,30 @@
       </div>
     </section>
 
+    <!-- ---------- DIVISI ---------- -->
+    <section id="view-divisions" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-4">
+        <div class="card p-4">
+          <h3 class="font-semibold mb-3">Tambah Divisi</h3>
+          <div class="space-y-3">
+            <div><label class="lbl">Nama Divisi *</label><input id="d_name" class="inp mt-1"></div>
+            <div><label class="lbl">Keterangan</label><input id="d_desc" class="inp mt-1"></div>
+            <button onclick="addDiv()" class="btn btn-pri w-full py-2.5">Tambah</button>
+          </div>
+          <p class="text-[11px] muted mt-3">Anggota satu divisi dapat <b>melihat</b> seluruh RAB rekan sedivisinya. Mengubah dan menghapus tetap hanya oleh pembuatnya atau admin.</p>
+        </div>
+        <div class="lg:col-span-2 card scroll-x">
+          <table class="w-full text-sm">
+            <thead class="thead"><tr>
+              <th class="px-3 py-2">Nama Divisi</th><th class="px-3 py-2">Keterangan</th>
+              <th class="px-3 py-2 text-right">Anggota</th><th class="px-3 py-2 text-right">RAB</th>
+              <th class="px-3 py-2">Aktif</th><th class="px-3 py-2"></th></tr></thead>
+            <tbody id="divBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------- USERS ---------- -->
     <section id="view-users" class="view hidden">
       <div class="grid lg:grid-cols-3 gap-4">
@@ -299,8 +330,12 @@
             <div><label class="lbl">Nama Lengkap</label><input id="newName" class="inp mt-1"></div>
             <div><label class="lbl">Email *</label><input id="newEmail" type="email" required class="inp mt-1"></div>
             <div><label class="lbl">Password *</label><input id="newPass" type="text" required minlength="6" class="inp mt-1"></div>
-            <div><label class="lbl">Divisi</label><input id="newDiv" class="inp mt-1"></div>
-            <div><label class="lbl">Role</label><select id="newRole" class="inp mt-1"><option value="user">user</option><option value="admin">admin</option></select></div>
+            <div><label class="lbl">Divisi</label>
+              <select id="newDiv" class="inp mt-1"><option value="">&mdash; pilih divisi &mdash;</option></select></div>
+            <div><label class="lbl">Role</label><select id="newRole" class="inp mt-1">
+              <option value="user">user &mdash; RAB sendiri + sedivisi</option>
+              <option value="manager">manager &mdash; lihat semua divisi</option>
+              <option value="admin">admin &mdash; akses penuh</option></select></div>
             <button class="btn btn-pri w-full py-2.5">Buat Akun</button>
           </form>
         </div>
@@ -384,7 +419,7 @@ const sbProv = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { storage: safeStorage, persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"rab-prov" }
 });
 
-const S = { user:null, profile:null, items:[], cats:[], rabs:[], users:[], logs:[], draft:{ id:null, lines:[] } };
+const S = { user:null, profile:null, items:[], cats:[], divs:[], rabs:[], users:[], logs:[], draft:{ id:null, lines:[] } };
 
 /* ===================== UTIL ===================== */
 const $ = id => document.getElementById(id);
@@ -527,11 +562,16 @@ async function bootApp(){
   $("authScreen").classList.add("hidden"); $("app").classList.remove("hidden");
   $("meEmail").textContent = prof.email;
   $("meMeta").textContent = (prof.division || "Tanpa divisi") + " \u00B7 " + prof.role;
-  if (prof.role === "admin") $("navUsers").classList.remove("hidden");
-  $("rabDivision").value = prof.division || "";
+  if (prof.role === "admin"){
+    $("navUsers").classList.remove("hidden");
+    $("navDivs").classList.remove("hidden");
+  }
+  await loadUsers();                 // peta profil (RLS membatasi isinya)
+  await loadDivs();
+  setRabMeta(prof.division, prof.full_name ? (prof.full_name + " (" + prof.email + ")") : prof.email);
   await loadCats();
   await Promise.all([loadItems(), loadRabs()]);
-  if (prof.role === "admin") loadUsers();
+  renderDivs();
   const last = (location.hash || "").replace("#","") || safeStorage.getItem("rab-tab") || "dashboard";
   switchTab(last === "users" && prof.role !== "admin" ? "dashboard" : last);
 }
@@ -547,6 +587,71 @@ function switchTab(tab){
   if (tab === "history") renderHistory();
   if (tab === "logs") loadLogs();
   if (tab === "rules") loadKw();
+}
+
+/* ===================== DIVISI ===================== */
+async function loadDivs(){
+  const { data } = await sb.from("divisions").select("*").order("name");
+  S.divs = data || [];
+  fillDivNames($("regDivision"), null, true);
+  if ($("newDiv")) fillDivNames($("newDiv"), null, true);
+
+  renderDivs();
+}
+function activeDivs(){ return S.divs.filter(d => d.is_active); }
+function fillDivNames(el, selectedName, allowEmpty){
+  if (!el) return;
+  el.innerHTML = (allowEmpty ? '<option value="">&mdash; pilih divisi &mdash;</option>' : "") +
+    activeDivs().map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join("");
+  if (selectedName) el.value = selectedName;
+}
+function rabDivisionValue(){
+  // RAB baru: divisi pembuat. RAB lama yang diedit: divisi aslinya dipertahankan.
+  if (S.draft.id){ const r = S.rabs.find(x => x.id === S.draft.id); if (r) return r.division; }
+  return (S.profile && S.profile.division) || null;
+}
+function setRabMeta(division, creator){
+  $("rabDivision").value = division || "(belum ada divisi)";
+  $("rabCreator").value  = creator  || "-";
+}
+function divIdByName(name){
+  const d = S.divs.find(x => x.name === name); return d ? d.id : null;
+}
+function renderDivs(){
+  if (!$("divBody")) return;
+  $("divBody").innerHTML = S.divs.map(d => {
+    const anggota = S.users.filter(u => u.division_id === d.id).length;
+    const rab = S.rabs.filter(r => r.division === d.name).length;
+    return `<tr class="row">
+      <td class="px-3 py-2"><input value="${esc(d.name)}" onchange="updDiv('${d.id}','name',this.value)" class="inp-sm w-44"></td>
+      <td class="px-3 py-2"><input value="${esc(d.description||"")}" onchange="updDiv('${d.id}','description',this.value)" class="inp-sm w-full"></td>
+      <td class="px-3 py-2 text-right">${anggota}</td>
+      <td class="px-3 py-2 text-right">${rab}</td>
+      <td class="px-3 py-2"><input type="checkbox" ${d.is_active?"checked":""} onchange="updDiv('${d.id}','is_active',this.checked)"></td>
+      <td class="px-3 py-2 text-right"><button onclick="delDiv('${d.id}',${anggota})" class="text-xs text-rose-600 underline">Hapus</button></td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="6" class="p-8 text-center muted">Belum ada divisi.</td></tr>';
+}
+async function addDiv(){
+  const name = $("d_name").value.trim();
+  if (!name) return toast("Nama divisi wajib diisi.", "err");
+  const { error } = await sb.from("divisions").insert({ name:name, description:$("d_desc").value.trim()||null });
+  if (error) return toast(error.message, "err");
+  $("d_name").value = ""; $("d_desc").value = "";
+  await loadDivs(); toast("Divisi ditambahkan.");
+}
+async function updDiv(id, field, val){
+  const patch = {}; patch[field] = (typeof val === "string" ? val.trim() || null : val);
+  const { error } = await sb.from("divisions").update(patch).eq("id", id);
+  if (error) return toast(error.message, "err");
+  await loadDivs(); await loadUsers(); toast("Divisi diperbarui.");
+}
+async function delDiv(id, anggota){
+  if (anggota > 0) return toast("Divisi ini masih punya " + anggota + " anggota. Pindahkan dulu anggotanya.", "err");
+  if (!confirm("Hapus divisi ini?")) return;
+  const { error } = await sb.from("divisions").delete().eq("id", id);
+  if (error) return toast(error.message, "err");
+  await loadDivs(); toast("Divisi dihapus.");
 }
 
 /* ===================== KATEGORI ===================== */
@@ -1047,7 +1152,7 @@ $("btnResetRab").onclick = () => resetBuilder();
 function resetBuilder(){
   S.draft = { id:null, lines:[] };
   ["rabTitle","rabProject","rabNotes"].forEach(i => $(i).value = "");
-  $("rabDivision").value = S.profile.division || "";
+  setRabMeta(S.profile.division, S.profile.full_name ? (S.profile.full_name + " (" + S.profile.email + ")") : S.profile.email);
   $("rabStatus").value = "Draft"; $("inpTax").value = 11;
   $("rabEditBadge").classList.add("hidden"); renderDraft();
 }
@@ -1057,7 +1162,7 @@ $("btnSaveRab").onclick = async () => {
   if (!S.draft.lines.length) return toast("Minimal 1 item.", "err");
   const t = totals();
   const header = { title:title, project_name:$("rabProject").value.trim()||null,
-    division:$("rabDivision").value.trim()||null, status:$("rabStatus").value,
+    division: rabDivisionValue(), status:$("rabStatus").value,
     notes:$("rabNotes").value.trim()||null, tax_percent:t.taxPct, margin_percent:0,
     subtotal:t.subtotal, margin_amount:0, tax_amount:t.tax, grand_total:t.grand };
   let rabId = S.draft.id;
@@ -1082,10 +1187,21 @@ $("btnSaveRab").onclick = async () => {
 };
 
 /* ===================== HISTORI ===================== */
+function withProfile(r){
+  if (!r) return r;
+  let p = S.users.find(u => u.id === r.created_by);
+  if (!p && S.profile && r.created_by === S.profile.id) p = S.profile;
+  r.profiles = p ? { email:p.email, division:p.division, full_name:p.full_name } : null;
+  return r;
+}
 async function loadRabs(){
-  const { data, error } = await sb.from("rabs").select("*, profiles:created_by(email, division, full_name)").order("created_at",{ascending:false});
+  if (S.profile && S.profile.role === "admin" && !S.users.length) await loadUsers();
+  const { data, error } = await sb.from("rabs").select("*").order("created_at",{ascending:false});
   if (error) return toast(error.message, "err");
-  S.rabs = data || []; renderHistory(); renderDashboard();
+  S.rabs = (data || []).map(withProfile); renderHistory(); renderDashboard();
+}
+function canEditRab(r){
+  return S.profile && (r.created_by === S.profile.id || S.profile.role === "admin");
 }
 function statusChip(s){
   if (s === "Approved") return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
@@ -1094,7 +1210,24 @@ function statusChip(s){
 }
 function renderHistory(){
   const q = ($("histSearch").value||"").toLowerCase(), st = $("histStatus").value;
-  const rows = S.rabs.filter(r => (!q || [r.title,r.project_name].join(" ").toLowerCase().includes(q)) && (!st || r.status===st));
+  const role = S.profile ? S.profile.role : "user";
+  const wide = (role === "admin" || role === "manager");
+  $("histScope").textContent = wide
+    ? "Menampilkan RAB dari seluruh divisi (" + role + ")."
+    : "Menampilkan RAB Anda dan rekan sedivisi" + (S.profile && S.profile.division ? " (" + S.profile.division + ")." : ".");
+  const dsel = $("histDiv");
+  dsel.classList.toggle("hidden", !wide);
+  if (wide){
+    const keep = dsel.value;
+    const names = [];
+    S.rabs.forEach(r => { if (r.division && names.indexOf(r.division) === -1) names.push(r.division); });
+    dsel.innerHTML = '<option value="">Semua Divisi</option>' +
+      names.sort().map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    if (keep) dsel.value = keep;
+  }
+  const dv = wide ? dsel.value : "";
+  const rows = S.rabs.filter(r => (!q || [r.title,r.project_name].join(" ").toLowerCase().includes(q))
+    && (!st || r.status===st) && (!dv || r.division===dv));
   $("histBody").innerHTML = rows.map(r => `<tr class="row">
     <td class="px-3 py-2 font-medium">${esc(r.title)}</td>
     <td class="px-3 py-2">${esc(r.project_name||"-")}</td>
@@ -1104,18 +1237,19 @@ function renderHistory(){
     <td class="px-3 py-2 text-right font-medium">${fmtRp(r.grand_total)}</td>
     <td class="px-3 py-2 text-right whitespace-nowrap text-xs">
       <button onclick="viewRab('${r.id}')" class="underline">Detail</button>
-      <button onclick="editRab('${r.id}')" class="underline ml-2">Edit</button>
+      ${canEditRab(r) ? `<button onclick="editRab('${r.id}')" class="underline ml-2">Edit</button>` : ""}
       <button onclick="exportRab('${r.id}','xlsx')" class="underline ml-2">Export to Excel</button>
       <button onclick="exportRab('${r.id}','pdf')" class="underline ml-2">Export to PDF</button>
-      <button onclick="delRab('${r.id}')" class="underline ml-2 text-rose-600">Hapus</button>
+      ${canEditRab(r) ? `<button onclick="delRab('${r.id}')" class="underline ml-2 text-rose-600">Hapus</button>` : ""}
     </td></tr>`).join("") || '<tr><td colspan="7" class="p-8 text-center muted">Belum ada RAB.</td></tr>';
 }
 $("histSearch").oninput = renderHistory;
 $("histStatus").onchange = renderHistory;
+$("histDiv").onchange = renderHistory;
 async function fetchRab(id){
-  const { data:r } = await sb.from("rabs").select("*, profiles:created_by(email, division, full_name)").eq("id",id).single();
+  const { data:r } = await sb.from("rabs").select("*").eq("id",id).single();
   const { data:lines } = await sb.from("rab_items").select("*").eq("rab_id",id).order("sort_order");
-  return { r:r, lines: lines||[] };
+  return { r: withProfile(r), lines: lines||[] };
 }
 async function viewRab(id){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
@@ -1148,7 +1282,7 @@ async function editRab(id){
     unit_price:Number(l.unit_price), vendor_price_id:l.vendor_price_id,
     price_source:l.price_source, price_ref:l.price_ref })) };
   $("rabTitle").value = r.title; $("rabProject").value = r.project_name||"";
-  $("rabDivision").value = r.division||""; $("rabStatus").value = r.status;
+  setRabMeta(r.division, r.profiles ? r.profiles.email : "-"); $("rabStatus").value = r.status;
   $("rabNotes").value = r.notes||""; $("inpTax").value = r.tax_percent;
   $("rabEditBadge").classList.remove("hidden"); renderDraft(); switchTab("builder");
 }
@@ -1163,7 +1297,7 @@ async function delRab(id){
 function draftAsRab(){
   const t = totals();
   return { r:{ title:$("rabTitle").value||"RAB Tanpa Judul", project_name:$("rabProject").value,
-      division:$("rabDivision").value, status:$("rabStatus").value, notes:$("rabNotes").value,
+      division: rabDivisionValue(), status:$("rabStatus").value, notes:$("rabNotes").value,
       created_at:new Date().toISOString(), profiles:{ email:S.profile.email },
       subtotal:t.subtotal, tax_percent:t.taxPct, tax_amount:t.tax, grand_total:t.grand },
     lines: S.draft.lines };
@@ -1267,9 +1401,13 @@ function renderUsers(){
   $("usersBody").innerHTML = S.users.map(u => `<tr class="row">
     <td class="px-3 py-2">${esc(u.email)}</td>
     <td class="px-3 py-2">${esc(u.full_name||"-")}</td>
-    <td class="px-3 py-2"><input value="${esc(u.division||"")}" onchange="updUser('${u.id}','division',this.value)" class="inp-sm w-36"></td>
+    <td class="px-3 py-2"><select onchange="updUser('${u.id}','division_id',this.value||null)" class="inp-sm w-40">
+      <option value="">&mdash; tanpa divisi &mdash;</option>
+      ${activeDivs().map(d => `<option value="${d.id}" ${u.division_id===d.id?"selected":""}>${esc(d.name)}</option>`).join("")}
+    </select></td>
     <td class="px-3 py-2"><select onchange="updUser('${u.id}','role',this.value)" class="inp-sm">
       <option value="user" ${u.role==="user"?"selected":""}>user</option>
+      <option value="manager" ${u.role==="manager"?"selected":""}>manager</option>
       <option value="admin" ${u.role==="admin"?"selected":""}>admin</option></select></td>
     <td class="px-3 py-2"><input type="checkbox" ${u.is_active?"checked":""} onchange="updUser('${u.id}','is_active',this.checked)"></td></tr>`).join("");
 }
@@ -1287,7 +1425,8 @@ $("userForm").onsubmit = async e => {
   if (error) return toast(error.message, "err");
   if (data.user && data.user.id){
     await sb.from("profiles").update({ role:$("newRole").value,
-      division:$("newDiv").value.trim()||null, full_name:$("newName").value.trim()||null }).eq("id", data.user.id);
+      division_id: divIdByName($("newDiv").value) ,
+      full_name:$("newName").value.trim()||null }).eq("id", data.user.id);
   }
   await sbProv.auth.signOut();
   e.target.reset(); toast("Akun dibuat: " + email); loadUsers();
@@ -1304,6 +1443,7 @@ $("userForm").onsubmit = async e => {
   } else if (storageMode === "cookie"){
     authMsg("localStorage diblokir browser; sesi disimpan lewat cookie sebagai cadangan.", "warn");
   }
+  try { await loadDivs(); } catch(e){}
   try {
     const res = await Promise.race([
       sb.auth.getSession(),
