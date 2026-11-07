@@ -9,7 +9,8 @@
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script>tailwind.config = { darkMode: 'class' };</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style type="text/tailwindcss">
   .card      { @apply bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl; }
@@ -426,7 +427,7 @@
 </div>
 
 <div id="toast" class="hidden fixed bottom-5 right-5 z-[60] px-4 py-3 rounded-lg shadow-lg text-sm text-white"></div>
-<div id="pdfStage" style="position:fixed;left:-10000px;top:0;width:794px;background:#fff;"></div>
+<div id="pdfStage" aria-hidden="true" style="position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1;"></div>
 
 <script>
 /* =====================================================================
@@ -1583,10 +1584,21 @@ function draftLinesForExport(){
   return S.draft.lines.map(l => Object.assign({}, l, { item_name: lineLabel(l) }));
 }
 $("btnXlsDraft").onclick = () => { const d = draftAsRab(); toXlsx(d.r, draftLinesForExport()); };
-$("btnPdfDraft").onclick = () => { const d = draftAsRab(); toPdf(d.r, draftLinesForExport()); };
+$("btnPdfDraft").onclick = async () => {
+  const b = $("btnPdfDraft");
+  b.disabled = true; b.textContent = "Menyiapkan PDF…";
+  try { const d = draftAsRab(); await toPdf(d.r, draftLinesForExport()); }
+  catch(err){ toast("Gagal membuat PDF: " + (err && err.message ? err.message : err), "err"); console.error(err); }
+  finally { b.disabled = false; b.textContent = "Export to PDF"; }
+};
 async function exportRab(id, kind){
   const res = await fetchRab(id), r = res.r, lines = res.lines;
-  if (kind === "xlsx") toXlsx(r, lines); else await toPdf(r, lines);
+  try {
+    if (kind === "xlsx") toXlsx(r, lines); else await toPdf(r, lines);
+  } catch(err){
+    toast("Gagal export: " + (err && err.message ? err.message : err), "err");
+    console.error(err); return;
+  }
   if (r.status === "Draft"){ await sb.from("rabs").update({ status:"Exported" }).eq("id", id); loadRabs(); }
 }
 function safeName(s){ return String(s||"RAB").replace(/[^\w\s-]/g,"").trim().replace(/\s+/g,"_").slice(0,60); }
@@ -1831,6 +1843,8 @@ function pdfNode(html){
    Dipakai agar tidak ada halaman kosong dan tabel panjang terpotong rapi. */
 async function renderPdf(nodes, filename){
   const JsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if (typeof html2canvas !== "function" || !JsPDF)
+    throw new Error("Pustaka PDF gagal dimuat. Periksa koneksi lalu muat ulang halaman.");
   const pdf = new JsPDF({ unit:"mm", format:"a4", orientation:"portrait" });
   const PW = 210, PH = 297;
   const stage = $("pdfStage");
