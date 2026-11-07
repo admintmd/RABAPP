@@ -1131,27 +1131,70 @@ async function previewCsv(e){
         <td class="px-2 py-1">${esc(r.unit)}</td><td class="px-2 py-1 text-right">${r.estimate_price?fmtRp(r.estimate_price):"-"}</td>
         <td class="px-2 py-1">${esc(r.vendor_name||"-")} ${r.unit_price?fmtRp(r.unit_price):""}</td></tr>`).join("")}</tbody></table>
     </div>
-    <button onclick="runImport()" class="btn btn-pri w-full">Import ${csvRows.length} Baris</button>`;
+    <label class="flex items-center gap-2 text-sm mb-3">
+      <input type="checkbox" id="csvSkipDup" checked>
+      Lewati baris yang namanya sudah ada di master (mencegah duplikat saat import ulang)
+    </label>
+    <button id="btnRunImport" onclick="runImport()" class="btn btn-pri w-full">Import ${csvRows.length} Baris</button>`;
 }
+let importBusy = false;
 async function runImport(){
-  let ok = 0, fail = 0;
-  for (const r of csvRows){
-    if (!r.name){ fail++; continue; }
+  if (importBusy) return;
+  importBusy = true;
+  const btn = $("btnRunImport");
+  if (btn){ btn.disabled = true; btn.textContent = "Mengimpor…"; }
+
+  const skipDup = $("csvSkipDup") ? $("csvSkipDup").checked : true;
+  const existing = {};
+  S.items.forEach(i => { existing[String(i.name).trim().toLowerCase()] = true; });
+
+  let ok = 0, dup = 0, fail = 0, harga = 0;
+  const gagal = [];
+  const total = csvRows.length;
+
+  for (let n = 0; n < csvRows.length; n++){
+    const r = csvRows[n];
+    if (btn) btn.textContent = "Mengimpor… " + (n+1) + "/" + total;
+    if (!r.name){ fail++; gagal.push("(baris " + (n+1) + ") nama kosong"); continue; }
+    if (skipDup && existing[r.name.trim().toLowerCase()]){ dup++; continue; }
+
     const res = await sb.from("items").insert({
       name:r.name, category_id:r._catId || null, unit:r.unit || "Pcs",
       item_type:(r.item_type === "Jasa" ? "Jasa" : "Barang"),
       description:r.description || null,
       estimate_price: r.estimate_price ? Number(r.estimate_price) : null
     }).select().single();
-    if (res.error){ fail++; continue; }
-    ok++;
+
+    if (res.error){ fail++; gagal.push(r.name + " — " + res.error.message); continue; }
+    ok++; existing[r.name.trim().toLowerCase()] = true;
+
     if (r.vendor_name && r.unit_price){
-      await sb.from("vendor_prices").insert({ item_id:res.data.id, vendor_name:r.vendor_name,
+      const vp = await sb.from("vendor_prices").insert({ item_id:res.data.id, vendor_name:r.vendor_name,
         po_number:r.po_number || null, po_date:r.po_date || null, unit_price:Number(r.unit_price) });
+      if (!vp.error) harga++;
     }
   }
-  closeModal(); await loadCats(); await loadItems();
-  toast("Import selesai: " + ok + " berhasil, " + fail + " gagal.");
+
+  importBusy = false;
+  await loadCats(); await loadItems();
+
+  openModal("Import Selesai", `
+    <div class="rounded-lg px-4 py-3 mb-4 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+      <div class="font-semibold text-base">&#10003; Import berhasil</div>
+      <div class="text-sm mt-1">${ok} item baru ditambahkan ke Master Barang/Jasa.</div>
+    </div>
+    <table class="w-full text-sm mb-3">
+      <tr class="border-b border-slate-200 dark:border-slate-700"><td class="py-1">Baris dibaca dari CSV</td><td class="py-1 text-right font-medium">${total}</td></tr>
+      <tr class="border-b border-slate-200 dark:border-slate-700"><td class="py-1">Item baru tersimpan</td><td class="py-1 text-right font-medium text-emerald-600 dark:text-emerald-400">${ok}</td></tr>
+      <tr class="border-b border-slate-200 dark:border-slate-700"><td class="py-1">Referensi harga vendor tersimpan</td><td class="py-1 text-right font-medium">${harga}</td></tr>
+      <tr class="border-b border-slate-200 dark:border-slate-700"><td class="py-1">Dilewati karena namanya sudah ada</td><td class="py-1 text-right font-medium text-amber-600 dark:text-amber-400">${dup}</td></tr>
+      <tr><td class="py-1">Gagal</td><td class="py-1 text-right font-medium ${fail ? "text-rose-600 dark:text-rose-400" : ""}">${fail}</td></tr>
+    </table>
+    ${gagal.length ? `<div class="text-xs muted mb-3"><b>Rincian gagal:</b><ul class="list-disc ml-4 mt-1">${gagal.slice(0,20).map(g => "<li>" + esc(g) + "</li>").join("")}</ul>${gagal.length>20 ? "<div class='mt-1'>…dan " + (gagal.length-20) + " lainnya.</div>" : ""}</div>` : ""}
+    <div class="flex justify-end gap-2">
+      <button onclick="closeModal(); switchTab('items');" class="btn btn-pri">Lihat Master Barang/Jasa</button>
+    </div>`);
+  toast("Import selesai: " + ok + " item baru, " + dup + " dilewati, " + fail + " gagal.");
 }
 
 /* ===================== RAB BUILDER ===================== */
