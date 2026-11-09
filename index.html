@@ -23,6 +23,7 @@
   .thead     { @apply text-left text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800; }
   .row       { @apply border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60; }
   .muted     { @apply text-slate-500 dark:text-slate-400; }
+  .num       { @apply tabular-nums whitespace-nowrap; }
   .navbtn    { @apply flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg text-left whitespace-nowrap
                       text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition; }
   .tab-active{ @apply bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-slate-900 dark:hover:bg-slate-100; }
@@ -201,12 +202,12 @@
         </div>
       </div>
       <div class="card scroll-x">
-        <table class="w-full text-sm sticky-head resp">
+        <table class="w-full text-sm sticky-head resp tabular-nums">
           <thead class="thead"><tr>
             <th class="px-3 py-2 w-10"><input type="checkbox" id="selAll" onclick="toggleAll(this.checked)" title="Pilih semua yang tampil"></th>
             <th class="px-3 py-2 w-14">Foto</th><th class="px-3 py-2">Kode</th><th class="px-3 py-2">Nama</th>
             <th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Satuan</th>
-            <th class="px-3 py-2 text-right">Harga Acuan</th><th class="px-3 py-2">Sumber</th>
+            <th class="px-3 py-2 text-right w-32 whitespace-nowrap">Harga Acuan (Rp)</th><th class="px-3 py-2">Sumber</th>
             <th class="px-3 py-2"></th></tr></thead>
           <tbody id="itemsBody"></tbody>
         </table>
@@ -256,12 +257,12 @@
           <div class="card">
             <div class="p-4 border-b border-slate-200 dark:border-slate-700"><h3 class="font-semibold">Rincian RAB</h3></div>
             <div class="scroll-x">
-              <table class="w-full text-sm resp">
+              <table class="w-full text-sm resp tabular-nums">
                 <thead class="thead"><tr>
                   <th class="px-3 py-2 w-8">#</th><th class="px-3 py-2">Uraian</th>
                   <th class="px-3 py-2 w-20">Satuan</th><th class="px-3 py-2 w-24">Qty</th>
-                  <th class="px-3 py-2 w-60">Acuan Harga</th><th class="px-3 py-2 text-right w-32">Harga Satuan</th>
-                  <th class="px-3 py-2 text-right w-36">Subtotal</th><th class="w-10"></th></tr></thead>
+                  <th class="px-3 py-2 w-60">Acuan Harga</th><th class="px-3 py-2 text-right w-32">Harga Satuan (Rp)</th>
+                  <th class="px-3 py-2 text-right w-36">Subtotal (Rp)</th><th class="w-10"></th></tr></thead>
                 <tbody id="draftBody"></tbody>
               </table>
             </div>
@@ -526,8 +527,9 @@ const S = { user:null, profile:null, items:[], cats:[], divs:[], rabs:[], users:
 
 /* ===================== UTIL ===================== */
 const $ = id => document.getElementById(id);
-const fmtRp = n => "Rp " + (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:2});
+const fmtRp = n => "Rp\u00A0" + (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:2});
 const fmtNum = n => (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:2});
+const fmtRp0 = n => (Number(n)||0).toLocaleString("id-ID",{maximumFractionDigits:0});
 const fmtDate = d => d ? new Date(d).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}) : "-";
 const fmtDT = d => d ? new Date(d).toLocaleString("id-ID",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"}) : "-";
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -1003,7 +1005,7 @@ function renderItems(){
         <div class="text-[11px] muted text-left">${esc(i.description||"")}</div></td>
       <td class="px-3 py-2" data-l="Kategori">${esc(i.category||"-")}</td>
       <td class="px-3 py-2" data-l="Satuan">${esc(i.unit)}</td>
-      <td class="px-3 py-2 text-right font-medium" data-l="Harga Acuan">${p.ref != null ? fmtRp(p.ref) : '<span class="text-amber-600 text-xs">Belum ada harga</span>'}</td>
+      <td class="px-3 py-2 text-right font-medium whitespace-nowrap" data-l="Harga Acuan">${p.ref != null ? fmtRp0(p.ref) : '<span class="text-amber-600 text-xs">Belum ada harga</span>'}</td>
       <td class="px-3 py-2 text-[11px] muted" data-l="Sumber"><span>${esc(p.refLabel||"-")}
         <button onclick="openPrices('${i.id}')" class="chip bg-slate-100 dark:bg-slate-800 ml-1">${p.count} PO</button></span></td>
       <td class="px-3 py-2 text-right whitespace-nowrap text-xs" data-l="">
@@ -1132,13 +1134,13 @@ function openPrices(itemId){
   openModal("Harga Vendor — " + it.name, `
     <div class="scroll-x mb-4"><table class="w-full text-sm">
       <thead class="thead"><tr><th class="px-2 py-2">Vendor</th><th class="px-2 py-2">No. PO</th>
-        <th class="px-2 py-2">Tanggal</th><th class="px-2 py-2 text-right">Harga</th>
+        <th class="px-2 py-2">Tanggal</th><th class="px-2 py-2 text-right">Harga (Rp)</th>
         <th class="px-2 py-2">Catatan</th><th></th></tr></thead>
       <tbody>${vps.map(v => `<tr class="row">
         <td class="px-2 py-2">${esc(v.vendor_name)}</td>
         <td class="px-2 py-2 font-mono text-xs">${esc(v.po_number||"-")}</td>
         <td class="px-2 py-2">${fmtDate(v.po_date)}</td>
-        <td class="px-2 py-2 text-right font-medium">${fmtRp(v.unit_price)}</td>
+        <td class="px-2 py-2 text-right font-medium whitespace-nowrap">${fmtRp0(v.unit_price)}</td>
         <td class="px-2 py-2 text-xs muted">${esc(v.notes||"")}</td>
         <td class="px-2 py-2 text-right"><button onclick="delPrice('${v.id}','${itemId}')" class="text-xs text-rose-600 underline">Hapus</button></td>
       </tr>`).join("") || '<tr><td colspan="6" class="p-4 text-center muted">Belum ada PO. Harga acuan memakai Harga Estimasi di master.</td></tr>'}
@@ -1287,8 +1289,8 @@ async function previewCsv(e){
       <tbody>${csvRows.slice(0,50).map(r => `<tr class="row">
         <td class="px-2 py-1">${esc(r.name)}</td>
         <td class="px-2 py-1">${esc(r._catName||"-")}<div class="text-[10px] muted">${esc(r._src||"")}</div></td>
-        <td class="px-2 py-1">${esc(r.unit)}</td><td class="px-2 py-1 text-right">${r.estimate_price?fmtRp(r.estimate_price):"-"}</td>
-        <td class="px-2 py-1">${esc(r.vendor_name||"-")} ${r.unit_price?fmtRp(r.unit_price):""}</td></tr>`).join("")}</tbody></table>
+        <td class="px-2 py-1">${esc(r.unit)}</td><td class="px-2 py-1 text-right">${r.estimate_price?fmtRp0(r.estimate_price):"-"}</td>
+        <td class="px-2 py-1">${esc(r.vendor_name||"-")} ${r.unit_price?fmtRp0(r.unit_price):""}</td></tr>`).join("")}</tbody></table>
     </div>
     <label class="flex items-center gap-2 text-sm mb-3">
       <input type="checkbox" id="csvSkipDup" checked>
@@ -1369,7 +1371,7 @@ $("builderSearch").oninput = e => {
         <div><div class="text-sm font-medium">${esc(i.name)}</div>
         <div class="text-[11px] muted">${esc(i.code)} \u00B7 ${esc(i.unit)} \u00B7 ${esc(i.category||"-")}</div></div></div>
       <div class="text-right text-xs whitespace-nowrap">
-        ${p.ref != null ? `<div class="font-medium">${fmtRp(p.ref)}</div><div class="muted">${p.count} PO</div>`
+        ${p.ref != null ? `<div class="font-medium">Rp ${fmtRp0(p.ref)}</div><div class="muted">${p.count} PO</div>`
                         : '<span class="text-amber-600">Belum ada harga</span>'}</div></div>`;
   }).join("") || '<div class="p-3 text-sm muted">Tidak ditemukan.</div>';
   box.classList.remove("hidden");
@@ -1418,9 +1420,9 @@ function renderDraft(){
   $("draftBody").innerHTML = S.draft.lines.map((l,idx) => {
     const it = S.items.find(x => x.id === l.item_id);
     const vps = it ? (it.vendor_prices||[]) : [];
-    const opts = vps.map(v => `<option value="${v.id}" ${l.vendor_price_id===v.id?"selected":""}>${esc(v.vendor_name)}${v.po_number?" \u00B7 "+esc(v.po_number):""} — ${fmtRp(v.unit_price)}</option>`).join("");
+    const opts = vps.map(v => `<option value="${v.id}" ${l.vendor_price_id===v.id?"selected":""}>${esc(v.vendor_name)}${v.po_number?" \u00B7 "+esc(v.po_number):""} — ${fmtRp0(v.unit_price)}</option>`).join("");
     const estOpt = (it && it.estimate_price != null)
-      ? `<option value="estimate" ${l.price_source==="estimate"?"selected":""}>Harga estimasi master — ${fmtRp(it.estimate_price)}</option>` : "";
+      ? `<option value="estimate" ${l.price_source==="estimate"?"selected":""}>Harga estimasi master — ${fmtRp0(it.estimate_price)}</option>` : "";
     return `<tr class="row align-top">
       <td class="px-3 py-2 muted hide-sm" data-l="">${idx+1}</td>
       <td class="px-3 py-2" data-l=""><div class="font-medium text-left">${idx+1}. ${esc(lineLabel(l))}</div>
@@ -1436,8 +1438,8 @@ function renderDraft(){
         </div></td>
       <td class="px-3 py-2" data-l="Acuan"><select onchange="pickPrice('${l.key}',this.value)" class="inp-sm w-full text-xs">${opts}${estOpt}</select>
         <div class="text-[11px] muted mt-1 text-right">${esc(l.price_ref||"")}</div></td>
-      <td class="px-3 py-2 text-right font-medium" data-l="Harga">${fmtRp(l.unit_price)}</td>
-      <td class="px-3 py-2 text-right font-semibold" data-l="Subtotal">${fmtRp(l.qty * l.unit_price)}</td>
+      <td class="px-3 py-2 text-right font-medium whitespace-nowrap" data-l="Harga (Rp)">${fmtRp0(l.unit_price)}</td>
+      <td class="px-3 py-2 text-right font-semibold whitespace-nowrap" data-l="Subtotal (Rp)">${fmtRp0(l.qty * l.unit_price)}</td>
       <td class="px-3 py-2 text-right" data-l=""><button onclick="delLine('${l.key}')" class="text-rose-500 text-xl leading-none px-2">&times;</button></td></tr>`;
   }).join("");
   recalc();
@@ -1578,7 +1580,7 @@ function renderHistory(){
     <td class="px-3 py-2" data-l="Pembuat"><div>${esc(r.profiles ? r.profiles.email : "-")}</div><div class="text-[11px] muted">${esc(r.division||"-")}</div></td>
     <td class="px-3 py-2" data-l="Tanggal">${fmtDate(r.created_at)}</td>
     <td class="px-3 py-2" data-l="Status"><span class="chip ${statusChip(r.status)}">${esc(r.status)}</span></td>
-    <td class="px-3 py-2 text-right font-semibold" data-l="Total">${fmtRp(r.grand_total)}</td>
+    <td class="px-3 py-2 text-right font-semibold whitespace-nowrap" data-l="Total (Rp)">${fmtRp0(r.grand_total)}</td>
     <td class="px-3 py-2 text-right whitespace-nowrap text-xs" data-l="">
       <button onclick="viewRab('${r.id}')" class="underline">Detail</button>
       ${canEditRab(r) ? `<button onclick="editRab('${r.id}')" class="underline ml-2">Edit</button>` : ""}
@@ -1606,14 +1608,14 @@ async function viewRab(id){
       ${r.notes?`<div><b>Catatan:</b> ${esc(r.notes)}</div>`:""}</div>
     <div class="scroll-x"><table class="w-full text-sm">
       <thead class="thead"><tr><th class="px-2 py-2">Uraian</th><th class="px-2 py-2">Sat</th>
-        <th class="px-2 py-2 text-right">Qty</th><th class="px-2 py-2 text-right">Harga</th>
-        <th class="px-2 py-2 text-right">Subtotal</th></tr></thead>
+        <th class="px-2 py-2 text-right">Qty</th><th class="px-2 py-2 text-right">Harga (Rp)</th>
+        <th class="px-2 py-2 text-right">Subtotal (Rp)</th></tr></thead>
       <tbody>${lines.map(l => `<tr class="row">
         <td class="px-2 py-2">${esc(l.item_name)}<div class="text-[11px] muted">${esc(l.price_ref||"")}</div></td>
         <td class="px-2 py-2 text-center">${esc(l.unit||"")}</td>
         <td class="px-2 py-2 text-right">${fmtNum(l.qty)}</td>
-        <td class="px-2 py-2 text-right">${fmtRp(l.unit_price)}</td>
-        <td class="px-2 py-2 text-right">${fmtRp(l.qty*l.unit_price)}</td></tr>`).join("")}</tbody>
+        <td class="px-2 py-2 text-right whitespace-nowrap">${fmtRp0(l.unit_price)}</td>
+        <td class="px-2 py-2 text-right whitespace-nowrap">${fmtRp0(l.qty*l.unit_price)}</td></tr>`).join("")}</tbody>
       <tfoot class="text-sm">
         <tr><td colspan="4" class="px-2 py-1 text-right">Subtotal</td><td class="px-2 py-1 text-right">${fmtRp(r.subtotal)}</td></tr>
         <tr><td colspan="4" class="px-2 py-1 text-right">PPN ${fmtNum(r.tax_percent)}%</td><td class="px-2 py-1 text-right">${fmtRp(r.tax_amount)}</td></tr>
